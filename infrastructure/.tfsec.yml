@@ -1,0 +1,11 @@
+# tfsec configuration
+# https://aquasecurity.github.io/tfsec/
+
+exclude:
+  # Suppress specific checks you've intentionally accepted risk for
+  # - AVD-AWS-0XXX
+
+severity_overrides: {}
+
+# Minimum severity to fail: CRITICAL, HIGH, MEDIUM, LOW
+minimum_severity: MEDIUM

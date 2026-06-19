@@ -1,0 +1,12 @@
+# Checkov configuration
+# https://www.checkov.io/
+
+framework:
+  - terraform
+
+# Add check IDs here to skip after documented review
+skip-check:
+  # CKV_AWS_XXXX: reason
+
+compact: true
+output: cli
