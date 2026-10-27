@@ -26,6 +26,8 @@ Trivy config and Checkov both run. A waiver is a comment on the resource, with a
 | CKV_AWS_118, CKV_AWS_157, CKV_AWS_293 | RDS module | Enhanced monitoring, Multi-AZ and deletion protection are off in dev. The production guardrail requires Multi-AZ and deletion protection. |
 | CKV_AWS_338 | Flow logs | A year of retention is a cost decision. Production keeps 90 days. |
 | CKV_AWS_18, CKV_AWS_144, CKV2_AWS_62 | Log and state buckets | The access-log bucket does not log to itself. Cross-region replication and event notifications are a cost decision. |
+| CKV_AWS_145, AVD-AWS-0132 | ALB access-log bucket | Application Load Balancer access logs only support SSE-S3. A customer managed key makes the load balancer refuse to enable logging. |
+| CKV_AWS_108 | Workload permissions boundary | The task role must read the database secret and decrypt it. The boundary is that ceiling. It denies `iam:*`. |
 
 ## Consequences
 

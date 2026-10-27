@@ -28,10 +28,10 @@ This is not an official AWS Well-Architected review.
 
 | Area | What this stack does | What it leaves |
 | --- | --- | --- |
-| Identity | OIDC, no access keys, deny user and key creation | Plan can write state. Apply policy size is unverified against the 10,240 character quota. |
+| Identity | OIDC, no access keys, deny changes to the CI roles, permissions boundary on workload roles | Plan can write the lock table. EC2 changes are limited to the region, not the environment tag. Apply policy size is unverified against the 10,240 character quota. |
 | Network | Private tasks, locked-down security groups, no public database | NAT egress to 0.0.0.0/0 on port 443. No WAF. No interface endpoints. |
 | Data | Encrypted at rest, SSL forced, password not in git | Backups have not been restored against a live account. |
-| Operations | fmt, validate, lint, test, scan on every pull request | Plan and apply are off until repository variables are set. The 5xx alarm has no notification target. |
+| Operations | fmt, validate, lint, test, scan on every pull request | Plan and apply are off until repository variables are set. The 5xx alarm has no action until alarm_sns_topic_arn is set. |
 | Cost | Dev is Spot, one NAT gateway, single-AZ | Prices in the README are estimates. Confirm them before apply. |
 
 ## History

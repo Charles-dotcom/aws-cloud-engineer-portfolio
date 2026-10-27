@@ -31,7 +31,7 @@ The tasks sit in private subnets. The load balancer is the only public entry. RD
 | `infrastructure/bootstrap` | State bucket, lock table, state KMS key, GitHub OIDC roles. First apply uses local state. |
 | `infrastructure/modules/workload` | Composes KMS, VPC, security groups, IAM, RDS and the ECS service. |
 | `infrastructure/environments/dev` | Two zones, one NAT gateway, Fargate Spot, single-AZ `db.t3.micro`. |
-| `infrastructure/environments/staging` | Same shape as dev, with flow logs and access logs. |
+| `infrastructure/environments/staging` | Same shape as dev, with flow logs and access logs. Not wired to CI. Apply it locally if you want a third copy. |
 | `infrastructure/environments/prod` | Three zones, NAT per zone, on-demand Fargate, Multi-AZ `db.t3.medium`, certificate required. |
 | `apps/api` | The image the service runs. Flask, gunicorn, Postgres. |
 | `apps/multi-container-app` | Local nginx and API lab. Not deployed by Terraform. |
@@ -109,16 +109,19 @@ Applying creates billable resources. Read the cost table first. The steps are in
 
 Tear down in this order. Destroy every environment before bootstrap, because the environments store state in the bootstrap bucket.
 
-1. In each environment you applied, from prod back to dev: `terraform destroy`. Prod has deletion protection on the database and the load balancer, and `prevent_destroy` on the workload KMS key. Turn deletion protection off, remove `prevent_destroy` from the key in a reviewed change, apply, then destroy. Prod also keeps a final snapshot.
-2. Empty the state bucket, including old versions. DynamoDB deletion protection and `prevent_destroy` on the bucket, the lock table and the state key block a casual destroy. Remove those guards in a reviewed change, apply, then `terraform destroy` in `infrastructure/bootstrap`.
-3. Customer managed keys wait for their deletion window (7 days outside prod, 30 days in prod and for the state key).
+1. Dev and staging: `terraform destroy` from that directory. Their KMS keys are not protected with `prevent_destroy`. AWS still waits for the 7-day deletion window after the destroy is accepted.
+2. Prod: turn `deletion_protection` off and apply. Then, in `modules/kms/main.tf`, remove the `lifecycle` block from `aws_kms_key.protected`, apply, and `terraform destroy`. Prod also keeps a final snapshot until you delete it.
+3. Empty the state bucket, including old versions. The state bucket, the lock table and the state key use `prevent_destroy`, and the lock table has deletion protection. Remove those guards in a reviewed change, apply, then `terraform destroy` in `infrastructure/bootstrap`.
+4. The state key waits 30 days. A prod workload key waits 30 days. A dev key waits 7.
 
 ## Security notes
 
 - No long-lived AWS keys. GitHub Actions assumes a role with OIDC. Apply roles trust a GitHub environment (`dev`, `staging`, `prod`), so apply can require a reviewer.
 - State, RDS, ECR, CloudWatch Logs and Secrets Manager use a customer managed key. S3 buckets deny non-TLS. RDS sets `rds.force_ssl=1`. The task sets `sslmode=require`.
-- Security groups have no inline rules, so the provider does not add an allow-all egress. Tasks may open 443 to the internet for AWS APIs through the NAT gateway. Interface VPC endpoints were left out on cost.
-- The plan role can write the state object. That is the residual risk of letting pull requests plan. See [ADR 003](docs/adr/003-secrets-and-oidc.md).
+- Security groups have no inline rules, so Terraform removes AWS's default allow-all egress. Tasks may open 443 to the internet for AWS APIs through the NAT gateway. Interface VPC endpoints were left out on cost.
+- The plan role reads state and writes only the lock table. It does not save or delete state. See [ADR 003](docs/adr/003-secrets-and-oidc.md).
+- The database password is in Secrets Manager. State stores the secret ARN, the key id and the secret status, not the password. The application connects as the master user. A real workload would add a least-privilege database role. IAM database authentication is enabled so that role can be added without replacing the instance.
+- Apply roles are split by environment, cannot edit the CI roles, and can attach only two AWS service policies, under a permissions boundary.
 - Scanners are Trivy, Checkov and gitleaks. Waivers sit on the resource, with the reason, and are listed in [ADR 004](docs/adr/004-security-scanning.md).
 - This is not an official AWS Well-Architected review. A short self-review is in [SECURITY.md](SECURITY.md).
 
@@ -126,7 +129,7 @@ Tear down in this order. Destroy every environment before bootstrap, because the
 
 - Terraform modules with pinned providers, validated variables, remote state and locking
 - A three-tier AWS workload: private tasks, a public load balancer, encrypted PostgreSQL
-- GitHub OIDC to AWS, environment-scoped apply, and least-privilege workflow permissions
+- GitHub OIDC to AWS, with a separate apply role per environment and a permissions boundary on the roles that environment creates
 - A pipeline that formats, validates, lints, tests and scans, and that stays cheap until plan and apply are switched on
 - Cost-aware defaults: Spot and one NAT gateway in dev, Multi-AZ and a certificate in prod
 
