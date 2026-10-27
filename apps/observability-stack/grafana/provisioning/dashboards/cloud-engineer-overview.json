@@ -1,26 +1,40 @@
 {
-  "dashboard": {
-    "title": "Cloud Engineer Portfolio - Observability",
-    "uid": "cloud-engineer-observability",
-    "time": { "from": "now-1h", "to": "now" },
-    "panels": [
-      {
-        "title": "Prometheus Up",
-        "type": "stat",
-        "targets": [
-          { "expr": "up", "legendFormat": "{{job}}" }
-        ],
-        "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 }
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
       },
-      {
-        "title": "Scrape Duration",
-        "type": "graph",
-        "targets": [
-          { "expr": "scrape_duration_seconds", "legendFormat": "{{job}}" }
-        ],
-        "gridPos": { "x": 6, "y": 0, "w": 18, "h": 8 }
-      }
-    ]
-  },
-  "overwrite": true
+      "targets": [{ "expr": "sum(up)", "refId": "A" }],
+      "title": "Targets up",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 8, "w": 18, "x": 6, "y": 0 },
+      "id": 2,
+      "targets": [{ "expr": "scrape_duration_seconds", "legendFormat": "{{job}}", "refId": "A" }],
+      "title": "Scrape duration",
+      "type": "timeseries"
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["portfolio"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timezone": "Africa/Johannesburg",
+  "title": "Portfolio observability",
+  "uid": "portfolio-observability",
+  "version": 1
 }

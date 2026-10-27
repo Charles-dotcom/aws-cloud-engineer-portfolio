@@ -1,0 +1,5 @@
+* text=auto eol=lf
+*.tf linguist-language=HCL
+*.tfvars linguist-language=HCL
+*.hcl linguist-language=HCL
+Makefile linguist-language=Makefile

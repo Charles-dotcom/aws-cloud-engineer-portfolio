@@ -1,0 +1,31 @@
+aws_region  = "af-south-1"
+project     = "portfolio"
+environment = "prod"
+owner       = "charles-mphahlele"
+cost_center = "portfolio"
+
+vpc_cidr             = "10.30.0.0/16"
+availability_zones   = ["af-south-1a", "af-south-1b", "af-south-1c"]
+public_subnet_cidrs  = ["10.30.0.0/24", "10.30.1.0/24", "10.30.2.0/24"]
+private_subnet_cidrs = ["10.30.10.0/24", "10.30.11.0/24", "10.30.12.0/24"]
+
+single_nat_gateway     = false
+enable_flow_logs       = true
+enable_alb_access_logs = true
+use_spot               = false
+multi_az               = true
+deletion_protection    = true
+skip_final_snapshot    = false
+task_cpu               = 1024
+task_memory            = 2048
+desired_count          = 3
+min_capacity           = 3
+max_capacity           = 6
+instance_class         = "db.t3.medium"
+
+# Replace ACCOUNT_ID and the certificate id before plan. The prod guardrail
+# rejects an empty certificate.
+certificate_arn = "arn:aws:acm:af-south-1:ACCOUNT_ID:certificate/REPLACE_ME"
+container_image = "ACCOUNT_ID.dkr.ecr.af-south-1.amazonaws.com/portfolio-prod:1.0.0"
+db_name         = "app"
+db_username     = "app"

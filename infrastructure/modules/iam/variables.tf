@@ -1,40 +1,31 @@
 variable "name" {
-  description = "Name prefix for all IAM resources"
+  description = "Name prefix for the task roles."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9-]{1,22}$", var.name))
+    error_message = "name must be 2-23 characters, lowercase, and start with a letter."
+  }
+}
+
+variable "region" {
+  description = "Region used in the kms:ViaService condition for Secrets Manager."
   type        = string
 }
 
 variable "secrets_arns" {
-  description = "List of Secrets Manager ARNs the ECS execution role can read"
+  description = "Secrets Manager ARNs the execution role may read. Empty disables the extra policy."
   type        = list(string)
   default     = []
 }
 
-variable "task_policy_statements" {
-  description = "IAM policy statements for the ECS task role (app-level permissions)"
-  type        = list(any)
-  default     = []
-}
-
-variable "enable_github_actions_role" {
-  description = "Create an OIDC role for GitHub Actions deployments"
-  type        = bool
-  default     = false
-}
-
-variable "aws_account_id" {
-  description = "AWS account ID (required for GitHub Actions OIDC role)"
+variable "kms_key_arn" {
+  description = "Key the execution role may decrypt, and only via Secrets Manager."
   type        = string
-  default     = ""
-}
-
-variable "github_repo" {
-  description = "GitHub repository in owner/repo format (e.g. my-org/my-repo)"
-  type        = string
-  default     = ""
 }
 
 variable "tags" {
-  description = "Tags to apply to all resources"
+  description = "Tags applied to the roles."
   type        = map(string)
   default     = {}
 }

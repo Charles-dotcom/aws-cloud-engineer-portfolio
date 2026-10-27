@@ -1,109 +1,114 @@
-terraform {
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
-    }
-  }
-}
+# Rules live in standalone resources so the load balancer can egress to the
+# tasks and the tasks can egress to the database without a dependency cycle.
+# aws_security_group removes the default allow-all egress when no inline
+# egress block is set.
 
-# ---------------------------------------------------------
-# ALB Security Group — public-facing HTTP/HTTPS only
-# ---------------------------------------------------------
 resource "aws_security_group" "alb" {
-  name        = "${var.name}-alb-sg"
-  description = "Allow inbound HTTP/HTTPS from internet to ALB"
+  #checkov:skip=CKV2_AWS_5:Attached by the ECS module through the alb security group output
+  name        = "${var.name}-alb"
+  description = "Public entry to the load balancer"
   vpc_id      = var.vpc_id
 
-  ingress {
-    description = "HTTP from internet"
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    description = "HTTPS from internet"
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  egress {
-    description = "Allow all outbound"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = merge(var.tags, { Name = "${var.name}-alb-sg" })
+  tags = merge(var.tags, {
+    Name = "${var.name}-alb"
+  })
 
   lifecycle {
     create_before_destroy = true
   }
 }
 
-# ---------------------------------------------------------
-# ECS Task Security Group — only from ALB
-# ---------------------------------------------------------
 resource "aws_security_group" "ecs_task" {
-  name        = "${var.name}-ecs-task-sg"
-  description = "Allow inbound only from ALB SG"
+  #checkov:skip=CKV2_AWS_5:Attached by the ECS service through the task security group output
+  name        = "${var.name}-tasks"
+  description = "Application tasks. Ingress only from the load balancer."
   vpc_id      = var.vpc_id
 
-  ingress {
-    description     = "From ALB"
-    from_port       = var.app_port
-    to_port         = var.app_port
-    protocol        = "tcp"
-    security_groups = [aws_security_group.alb.id]
-  }
-
-  egress {
-    description = "Allow all outbound (for ECR, SSM, etc.)"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = merge(var.tags, { Name = "${var.name}-ecs-task-sg" })
+  tags = merge(var.tags, {
+    Name = "${var.name}-tasks"
+  })
 
   lifecycle {
     create_before_destroy = true
   }
 }
 
-# ---------------------------------------------------------
-# RDS Security Group — only from ECS tasks
-# ---------------------------------------------------------
 resource "aws_security_group" "rds" {
-  name        = "${var.name}-rds-sg"
-  description = "Allow inbound only from ECS task SG"
+  #checkov:skip=CKV2_AWS_5:Attached by the RDS module through the database security group output
+  name        = "${var.name}-rds"
+  description = "PostgreSQL. Ingress only from application tasks."
   vpc_id      = var.vpc_id
 
-  ingress {
-    description     = "From ECS tasks"
-    from_port       = var.db_port
-    to_port         = var.db_port
-    protocol        = "tcp"
-    security_groups = [aws_security_group.ecs_task.id]
-  }
-
-  egress {
-    description = "No outbound needed for RDS"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = merge(var.tags, { Name = "${var.name}-rds-sg" })
+  tags = merge(var.tags, {
+    Name = "${var.name}-rds"
+  })
 
   lifecycle {
     create_before_destroy = true
   }
+}
+
+resource "aws_vpc_security_group_ingress_rule" "alb_http" {
+  #checkov:skip=CKV_AWS_260:Port 80 stays open so the listener can redirect clients to HTTPS
+  security_group_id = aws_security_group.alb.id
+  description       = "HTTP from clients, redirected to HTTPS when a certificate is set"
+  ip_protocol       = "tcp"
+  from_port         = 80
+  to_port           = 80
+  cidr_ipv4         = var.alb_ingress_cidr
+}
+
+resource "aws_vpc_security_group_ingress_rule" "alb_https" {
+  security_group_id = aws_security_group.alb.id
+  description       = "HTTPS from clients"
+  ip_protocol       = "tcp"
+  from_port         = 443
+  to_port           = 443
+  cidr_ipv4         = var.alb_ingress_cidr
+}
+
+resource "aws_vpc_security_group_egress_rule" "alb_to_tasks" {
+  security_group_id            = aws_security_group.alb.id
+  description                  = "Application port on the tasks"
+  ip_protocol                  = "tcp"
+  from_port                    = var.app_port
+  to_port                      = var.app_port
+  referenced_security_group_id = aws_security_group.ecs_task.id
+}
+
+resource "aws_vpc_security_group_ingress_rule" "tasks_from_alb" {
+  security_group_id            = aws_security_group.ecs_task.id
+  description                  = "Application port from the load balancer"
+  ip_protocol                  = "tcp"
+  from_port                    = var.app_port
+  to_port                      = var.app_port
+  referenced_security_group_id = aws_security_group.alb.id
+}
+
+# trivy:ignore:AVD-AWS-0104 Tasks reach ECR, CloudWatch Logs and Secrets Manager through the NAT gateway. Interface endpoints were left out because each one is billed per hour per zone.
+resource "aws_vpc_security_group_egress_rule" "tasks_https" {
+  security_group_id = aws_security_group.ecs_task.id
+  description       = "HTTPS to AWS APIs through the NAT gateway"
+  ip_protocol       = "tcp"
+  from_port         = 443
+  to_port           = 443
+  cidr_ipv4         = "0.0.0.0/0"
+}
+
+resource "aws_vpc_security_group_egress_rule" "tasks_to_rds" {
+  security_group_id            = aws_security_group.ecs_task.id
+  description                  = "PostgreSQL on RDS"
+  ip_protocol                  = "tcp"
+  from_port                    = var.db_port
+  to_port                      = var.db_port
+  referenced_security_group_id = aws_security_group.rds.id
+}
+
+resource "aws_vpc_security_group_ingress_rule" "rds_from_tasks" {
+  security_group_id            = aws_security_group.rds.id
+  description                  = "PostgreSQL from application tasks"
+  ip_protocol                  = "tcp"
+  from_port                    = var.db_port
+  to_port                      = var.db_port
+  referenced_security_group_id = aws_security_group.ecs_task.id
 }

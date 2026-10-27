@@ -1,32 +1,9 @@
-# Multi-Container Application Demo
+# Multi-container lab
 
-This example shows a **production-style multi-container deployment** using:
-
-- **Nginx** as reverse proxy / load balancer
-- **Flask API** as backend service
-- Docker Compose for local development
-- Ready to extend to Amazon ECS (Fargate) with multi-container task definitions
-
-## Local Development
+Nginx in front of a small Flask API. This is a local pattern, not the image ECS runs. The ECS service runs `apps/api`.
 
 ```bash
-cd apps/multi-container-app
-
 docker compose up --build
 ```
 
-Then open http://localhost — Nginx proxies to the Flask API.
-
-## Why Multi-Container Matters
-
-Real-world applications almost always consist of multiple services (web, API, worker, cache, etc.). Showing you can design, build, and orchestrate them cleanly is a strong signal for Cloud/DevOps/SRE roles.
-
-## Next Steps (Production)
-
-- Add a proper healthcheck endpoint + readiness probe
-- Use Amazon ECS with a single Task Definition containing both containers (sidecar pattern)
-- Add logging aggregation (Fluent Bit or CloudWatch)
-- Add service discovery / ALB target groups per service
-- Implement blue/green or canary deployments for the API
-
-This pattern scales well to more complex stacks (e.g. adding a worker + Redis/SQS).
+Nginx is published on port 8088 so it does not collide with anything already bound to port 80. The API image runs as a non-root user. The official Nginx image still starts as root so it can bind port 80 inside the container.

@@ -1,0 +1,26 @@
+aws_region  = "af-south-1"
+project     = "portfolio"
+environment = "dev"
+owner       = "charles-mphahlele"
+cost_center = "portfolio"
+
+vpc_cidr             = "10.10.0.0/16"
+availability_zones   = ["af-south-1a", "af-south-1b"]
+public_subnet_cidrs  = ["10.10.0.0/24", "10.10.1.0/24"]
+private_subnet_cidrs = ["10.10.10.0/24", "10.10.11.0/24"]
+
+single_nat_gateway = true
+enable_flow_logs   = false
+use_spot           = true
+task_cpu           = 256
+task_memory        = 512
+desired_count      = 1
+min_capacity       = 1
+max_capacity       = 2
+instance_class     = "db.t3.micro"
+multi_az           = false
+
+# Replace ACCOUNT_ID after bootstrap. Do not use the tag "latest".
+container_image = "ACCOUNT_ID.dkr.ecr.af-south-1.amazonaws.com/portfolio-dev:1.0.0"
+db_name         = "app"
+db_username     = "app"

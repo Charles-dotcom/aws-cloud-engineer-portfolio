@@ -1,64 +1,60 @@
-# Setting up OIDC between GitHub Actions and AWS (Recommended)
+# First apply
 
-Using OIDC eliminates the need to store long-lived AWS access keys as GitHub secrets. This is a **security best practice** in 2025+.
+This spends money. Read the cost table in the [README](../README.md) first. Nothing in CI applies until you set the variables below.
 
-## Step-by-step
+## 1. Bootstrap, locally, once
 
-### 1. Create an IAM Identity Provider in AWS
-
-Go to IAM → Identity providers → Add provider
-
-- **Provider type**: OpenID Connect
-- **Provider URL**: `https://token.actions.githubusercontent.com`
-- **Audience**: `sts.amazonaws.com`
-
-### 2. Create an IAM Role for GitHub Actions
-
-1. IAM → Roles → Create role
-2. **Trusted entity type**: Web identity
-3. Select the OIDC provider you just created
-4. **Audience**: `sts.amazonaws.com`
-5. Add condition (recommended for security):
-
-```json
-{
-  "StringEquals": {
-    "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
-  },
-  "StringLike": {
-    "token.actions.githubusercontent.com:sub": "repo:yourusername/cloud-engineer-portfolio:*"
-  }
-}
+```bash
+cd infrastructure/bootstrap
+cp terraform.tfvars.example terraform.tfvars
+# Edit owner and cost_center if you need to. Leave github_repository as this repo.
+terraform init
+terraform plan
+terraform apply
 ```
 
-6. Attach permissions policies (least privilege):
-   - For the static website example: `AmazonS3FullAccess` + `CloudFrontFullAccess` (or tighter custom policy)
-   - For real projects: Create specific policies per environment/repo
+The first state file is local. Copy the outputs: state bucket, lock table, KMS key ARN, plan role ARN, apply role ARNs.
 
-7. Name the role: `github-actions-oidc-role`
+Then copy `backend.s3.tf.example` to `backend.s3.tf`, replace `ACCOUNT_ID` and `KEY_ID`, and run:
 
-### 3. Update the Workflows
-
-In `.github/workflows/*.yml`, replace:
-
-```yaml
-role-to-assume: arn:aws:iam::YOUR_ACCOUNT_ID:role/github-actions-oidc-role
+```bash
+terraform init -migrate-state
 ```
 
-Replace `YOUR_ACCOUNT_ID` with your actual AWS account ID.
+`terraform.tfvars` and `backend.s3.tf` are gitignored.
 
-### 4. (Optional but recommended) Use different roles per environment
+## 2. Build the image
 
-- `github-actions-oidc-role-dev`
-- `github-actions-oidc-role-prod`
+The service rejects a `:latest` tag. ECR is immutable. From `apps/api`, build and push an immutable tag to the repository the dev stack will create, or push to a repository you already have and set `container_image` to that URI. The example is:
 
-Then use GitHub environments + required reviewers for production applies.
+```text
+ACCOUNT_ID.dkr.ecr.af-south-1.amazonaws.com/portfolio-dev:1.0.0
+```
 
-## Why this matters
+The account id is the one from `aws sts get-caller-identity`. Do not commit it.
 
-- No AWS keys in GitHub
-- Short-lived credentials (15 minutes default)
-- auditable via CloudTrail
-- Follows zero-trust principles
+## 3. Dev root
 
-This pattern is used in all mature cloud teams.
+```bash
+cd infrastructure/environments/dev
+cp terraform.tfvars.example terraform.tfvars
+cp backend.hcl.example backend.hcl
+```
+
+Replace `ACCOUNT_ID` and `KEY_ID`. Set `container_image` to the tag you pushed. Then `terraform init -backend-config=backend.hcl` and `terraform plan`. Apply only if you accept the cost.
+
+Staging and prod are the same shape. Prod will not plan without an ACM certificate ARN in `af-south-1`.
+
+## 4. OIDC subject
+
+The trust policy expects the classic subject:
+
+```text
+repo:Charles-dotcom/aws-cloud-engineer-portfolio:pull_request
+repo:Charles-dotcom/aws-cloud-engineer-portfolio:ref:refs/heads/main
+repo:Charles-dotcom/aws-cloud-engineer-portfolio:environment:dev
+```
+
+This repository was created on 19 June 2026. GitHub's immutable subject-claim change on 15 July 2026 does not apply unless the repository opted in. If a sample token shows `repo:Charles-dotcom@80262628/aws-cloud-engineer-portfolio@1274291282:...`, update `github_repository` handling in the trust policy before CI can assume the role.
+
+AWS ignores the GitHub OIDC thumbprint. The provider still sets one, because the API requires it.
