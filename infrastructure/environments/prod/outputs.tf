@@ -1,6 +1,34 @@
-output "alb_dns_name" { value = module.ecs.alb_dns_name }
-output "ecr_repository_url" { value = module.ecs.ecr_repository_url }
-output "ecs_cluster_name" { value = module.ecs.ecs_cluster_name }
-output "ecs_service_name" { value = module.ecs.ecs_service_name }
-output "db_endpoint" { value = module.rds.db_endpoint; sensitive = true }
-output "github_actions_role_arn" { value = module.iam.github_actions_role_arn }
+output "alb_dns_name" {
+  description = "DNS name of the production load balancer."
+  value       = module.workload.alb_dns_name
+}
+
+output "ecr_repository_url" {
+  description = "Push the immutable image tag here."
+  value       = module.workload.ecr_repository_url
+}
+
+output "ecs_cluster_name" {
+  description = "ECS cluster name."
+  value       = module.workload.ecs_cluster_name
+}
+
+output "ecs_service_name" {
+  description = "ECS service name."
+  value       = module.workload.ecs_service_name
+}
+
+output "log_group_name" {
+  description = "Application log group."
+  value       = module.workload.log_group_name
+}
+
+output "db_address" {
+  description = "Private database hostname."
+  value       = module.workload.db_address
+}
+
+output "credentials_secret_arn" {
+  description = "RDS-managed secret ARN. The password is not an output."
+  value       = module.workload.credentials_secret_arn
+}

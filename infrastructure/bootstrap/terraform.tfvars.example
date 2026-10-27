@@ -1,0 +1,5 @@
+aws_region        = "af-south-1"
+project           = "portfolio"
+owner             = "charles-mphahlele"
+cost_center       = "portfolio"
+github_repository = "Charles-dotcom/aws-cloud-engineer-portfolio"

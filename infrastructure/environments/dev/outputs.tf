@@ -1,28 +1,34 @@
 output "alb_dns_name" {
-  description = "ALB DNS name — point your dev DNS here"
-  value       = module.ecs.alb_dns_name
+  description = "DNS name of the development load balancer."
+  value       = module.workload.alb_dns_name
 }
 
 output "ecr_repository_url" {
-  description = "ECR repository URL for pushing images"
-  value       = module.ecs.ecr_repository_url
+  description = "Push the immutable image tag here."
+  value       = module.workload.ecr_repository_url
 }
 
 output "ecs_cluster_name" {
-  value = module.ecs.ecs_cluster_name
+  description = "ECS cluster name."
+  value       = module.workload.ecs_cluster_name
 }
 
 output "ecs_service_name" {
-  value = module.ecs.ecs_service_name
+  description = "ECS service name."
+  value       = module.workload.ecs_service_name
 }
 
-output "db_endpoint" {
-  description = "RDS endpoint (private, within VPC)"
-  value       = module.rds.db_endpoint
-  sensitive   = true
+output "log_group_name" {
+  description = "Application log group."
+  value       = module.workload.log_group_name
 }
 
-output "github_actions_role_arn" {
-  description = "Role ARN to use in GitHub Actions OIDC config"
-  value       = module.iam.github_actions_role_arn
+output "db_address" {
+  description = "Private database hostname."
+  value       = module.workload.db_address
+}
+
+output "credentials_secret_arn" {
+  description = "RDS-managed secret ARN. The password is not an output."
+  value       = module.workload.credentials_secret_arn
 }

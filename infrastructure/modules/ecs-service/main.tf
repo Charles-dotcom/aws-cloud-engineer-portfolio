@@ -1,15 +1,35 @@
-terraform {
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
+locals {
+  # Pairs documented for the sizes this stack exposes. Reject anything else
+  # rather than discover it at apply time.
+  fargate_sizes = toset([
+    "256/512", "256/1024", "256/2048",
+    "512/1024", "512/2048", "512/3072", "512/4096",
+    "1024/2048", "1024/3072", "1024/4096", "1024/8192",
+    "2048/4096", "2048/8192", "2048/16384",
+  ])
+
+  health_command = [
+    "CMD-SHELL",
+    "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:${var.container_port}${var.health_check_path}')\" || exit 1",
+  ]
+}
+
+resource "terraform_data" "fargate_size" {
+  input = "${var.task_cpu}/${var.task_memory}"
+
+  lifecycle {
+    precondition {
+      condition     = contains(local.fargate_sizes, "${var.task_cpu}/${var.task_memory}")
+      error_message = "task_cpu and task_memory are not a supported Fargate pair. See the module variables."
+    }
+
+    precondition {
+      condition     = var.min_capacity <= var.desired_count && var.desired_count <= var.max_capacity
+      error_message = "min_capacity, desired_count and max_capacity are out of order."
     }
   }
 }
 
-# ---------------------------------------------------------
-# ECR Repository
-# ---------------------------------------------------------
 resource "aws_ecr_repository" "this" {
   name                 = var.name
   image_tag_mutability = "IMMUTABLE"
@@ -19,7 +39,8 @@ resource "aws_ecr_repository" "this" {
   }
 
   encryption_configuration {
-    encryption_type = "AES256"
+    encryption_type = "KMS"
+    kms_key         = var.kms_key_arn
   }
 
   tags = var.tags
@@ -31,20 +52,19 @@ resource "aws_ecr_lifecycle_policy" "this" {
   policy = jsonencode({
     rules = [{
       rulePriority = 1
-      description  = "Keep last 10 images"
+      description  = "Keep the last 10 images"
       selection = {
         tagStatus   = "any"
         countType   = "imageCountMoreThan"
         countNumber = 10
       }
-      action = { type = "expire" }
+      action = {
+        type = "expire"
+      }
     }]
   })
 }
 
-# ---------------------------------------------------------
-# ECS Cluster
-# ---------------------------------------------------------
 resource "aws_ecs_cluster" "this" {
   name = "${var.name}-cluster"
 
@@ -63,22 +83,18 @@ resource "aws_ecs_cluster_capacity_providers" "this" {
   default_capacity_provider_strategy {
     capacity_provider = var.use_spot ? "FARGATE_SPOT" : "FARGATE"
     weight            = 1
+    base              = 0
   }
 }
 
-# ---------------------------------------------------------
-# CloudWatch Log Group
-# ---------------------------------------------------------
 resource "aws_cloudwatch_log_group" "this" {
   name              = "/ecs/${var.name}"
   retention_in_days = var.log_retention_days
+  kms_key_id        = var.kms_key_arn
 
   tags = var.tags
 }
 
-# ---------------------------------------------------------
-# Task Definition
-# ---------------------------------------------------------
 resource "aws_ecs_task_definition" "this" {
   family                   = var.name
   network_mode             = "awsvpc"
@@ -87,6 +103,10 @@ resource "aws_ecs_task_definition" "this" {
   memory                   = var.task_memory
   execution_role_arn       = var.execution_role_arn
   task_role_arn            = var.task_role_arn
+
+  volume {
+    name = "tmp"
+  }
 
   container_definitions = jsonencode([{
     name      = var.name
@@ -99,22 +119,31 @@ resource "aws_ecs_task_definition" "this" {
     }]
 
     environment = var.environment_variables
-
-    secrets = var.secret_variables
+    secrets     = var.secret_variables
 
     logConfiguration = {
       logDriver = "awslogs"
       options = {
-        "awslogs-group"         = aws_cloudwatch_log_group.this.name
-        "awslogs-region"        = var.aws_region
-        "awslogs-stream-prefix" = "ecs"
+        awslogs-group         = aws_cloudwatch_log_group.this.name
+        awslogs-region        = var.region
+        awslogs-stream-prefix = "ecs"
       }
     }
 
-    readonlyRootFilesystem = true
+    readonlyRootFilesystem = var.readonly_root_filesystem
+
+    mountPoints = [{
+      sourceVolume  = "tmp"
+      containerPath = "/tmp"
+      readOnly      = false
+    }]
+
+    linuxParameters = {
+      initProcessEnabled = true
+    }
 
     healthCheck = {
-      command     = ["CMD-SHELL", "curl -f http://localhost:${var.container_port}${var.health_check_path} || exit 1"]
+      command     = local.health_command
       interval    = 30
       timeout     = 5
       retries     = 3
@@ -123,30 +152,173 @@ resource "aws_ecs_task_definition" "this" {
   }])
 
   tags = var.tags
+
+  depends_on = [terraform_data.fargate_size]
 }
 
-# ---------------------------------------------------------
-# ALB
-# ---------------------------------------------------------
+# trivy:ignore:AVD-AWS-0053 This load balancer is the public entry point of the workload.
 resource "aws_lb" "this" {
-  name               = "${var.name}-alb"
-  internal           = false
-  load_balancer_type = "application"
-  security_groups    = [var.alb_sg_id]
-  subnets            = var.public_subnet_ids
+  #checkov:skip=CKV2_AWS_28:AWS WAF is a separate bill and is not part of this demonstration. Add it in front of production before real traffic.
+  #checkov:skip=CKV2_AWS_20:The HTTP listener redirects to HTTPS when a certificate is set. Checkov reports this against the load balancer, and production refuses an empty certificate.
+  name                       = "${var.name}-alb"
+  internal                   = false
+  load_balancer_type         = "application"
+  security_groups            = [var.alb_sg_id]
+  subnets                    = var.public_subnet_ids
+  drop_invalid_header_fields = true
+  enable_deletion_protection = var.deletion_protection
+  enable_http2               = true
+  desync_mitigation_mode     = "defensive"
+  idle_timeout               = 60
 
-  enable_deletion_protection = var.environment == "prod" ? true : false
+  dynamic "access_logs" {
+    for_each = var.enable_access_logs ? [1] : []
 
-  access_logs {
-    bucket  = var.alb_logs_bucket
-    prefix  = var.name
-    enabled = var.alb_logs_bucket != "" ? true : false
+    content {
+      bucket  = aws_s3_bucket.access_logs[0].id
+      prefix  = var.name
+      enabled = true
+    }
   }
 
   tags = var.tags
 }
 
+# This bucket holds the load balancer access logs. Logging it to itself
+# would recurse, and cross-region replication plus event notifications
+# would add cost without changing the demonstration.
+resource "aws_s3_bucket" "access_logs" {
+  #checkov:skip=CKV_AWS_18:This bucket is the access-log destination. It does not log to itself.
+  #checkov:skip=CKV_AWS_144:Cross-region replication of access logs is a cost decision and is not enabled here
+  #checkov:skip=CKV2_AWS_62:Event notifications are not required to retain access logs
+  count = var.enable_access_logs ? 1 : 0
+
+  bucket = "${var.name}-alb-logs-${var.account_id}"
+
+  tags = merge(var.tags, {
+    Name = "${var.name}-alb-logs"
+  })
+}
+
+resource "aws_s3_bucket_public_access_block" "access_logs" {
+  count = var.enable_access_logs ? 1 : 0
+
+  bucket                  = aws_s3_bucket.access_logs[0].id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_ownership_controls" "access_logs" {
+  count = var.enable_access_logs ? 1 : 0
+
+  bucket = aws_s3_bucket.access_logs[0].id
+
+  rule {
+    object_ownership = "BucketOwnerEnforced"
+  }
+}
+
+resource "aws_s3_bucket_versioning" "access_logs" {
+  count = var.enable_access_logs ? 1 : 0
+
+  bucket = aws_s3_bucket.access_logs[0].id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "access_logs" {
+  count = var.enable_access_logs ? 1 : 0
+
+  bucket = aws_s3_bucket.access_logs[0].id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm     = "aws:kms"
+      kms_master_key_id = var.kms_key_arn
+    }
+    bucket_key_enabled = true
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "access_logs" {
+  count = var.enable_access_logs ? 1 : 0
+
+  bucket = aws_s3_bucket.access_logs[0].id
+
+  rule {
+    id     = "expire-old-logs"
+    status = "Enabled"
+
+    filter {}
+
+    expiration {
+      days = 90
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+}
+
+data "aws_iam_policy_document" "access_logs" {
+  count = var.enable_access_logs ? 1 : 0
+
+  statement {
+    sid    = "AllowELBLogDelivery"
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["logdelivery.elasticloadbalancing.amazonaws.com"]
+    }
+
+    actions   = ["s3:PutObject"]
+    resources = ["${aws_s3_bucket.access_logs[0].arn}/AWSLogs/${var.account_id}/*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [var.account_id]
+    }
+  }
+
+  statement {
+    sid    = "DenyInsecureTransport"
+    effect = "Deny"
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    actions = ["s3:*"]
+    resources = [
+      aws_s3_bucket.access_logs[0].arn,
+      "${aws_s3_bucket.access_logs[0].arn}/*",
+    ]
+
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "access_logs" {
+  count = var.enable_access_logs ? 1 : 0
+
+  bucket = aws_s3_bucket.access_logs[0].id
+  policy = data.aws_iam_policy_document.access_logs[0].json
+}
+
 resource "aws_lb_target_group" "this" {
+  #checkov:skip=CKV_AWS_378:TLS ends at the load balancer. Tasks speak HTTP on the application port inside the VPC.
   name        = "${var.name}-tg"
   port        = var.container_port
   protocol    = "HTTP"
@@ -168,16 +340,23 @@ resource "aws_lb_target_group" "this" {
   tags = var.tags
 }
 
+# With a certificate the listener redirects to HTTPS. Without one, which
+# is the development default, it forwards so the stack can be planned
+# before a certificate exists. Production refuses an empty certificate.
+# trivy:ignore:AVD-AWS-0054
 resource "aws_lb_listener" "http" {
+  #checkov:skip=CKV_AWS_103:The HTTP listener redirects to TLS 1.2 or later once a certificate is set
+  #checkov:skip=CKV2_AWS_20:The redirect is a dynamic action and is required in production
   load_balancer_arn = aws_lb.this.arn
   port              = 80
   protocol          = "HTTP"
 
-  # Redirect HTTP → HTTPS if cert is provided, else forward
   dynamic "default_action" {
-    for_each = var.certificate_arn != "" ? [1] : []
+    for_each = var.certificate_arn == "" ? [] : [1]
+
     content {
       type = "redirect"
+
       redirect {
         port        = "443"
         protocol    = "HTTPS"
@@ -188,6 +367,7 @@ resource "aws_lb_listener" "http" {
 
   dynamic "default_action" {
     for_each = var.certificate_arn == "" ? [1] : []
+
     content {
       type             = "forward"
       target_group_arn = aws_lb_target_group.this.arn
@@ -196,7 +376,7 @@ resource "aws_lb_listener" "http" {
 }
 
 resource "aws_lb_listener" "https" {
-  count = var.certificate_arn != "" ? 1 : 0
+  count = var.certificate_arn == "" ? 0 : 1
 
   load_balancer_arn = aws_lb.this.arn
   port              = 443
@@ -210,24 +390,27 @@ resource "aws_lb_listener" "https" {
   }
 }
 
-# ---------------------------------------------------------
-# ECS Service
-# ---------------------------------------------------------
 resource "aws_ecs_service" "this" {
-  name                               = var.name
-  cluster                            = aws_ecs_cluster.this.id
-  task_definition                    = aws_ecs_task_definition.this.arn
-  desired_count                      = var.desired_count
-  launch_type                        = var.use_spot ? null : "FARGATE"
-  platform_version                   = "LATEST"
+  name                   = var.name
+  cluster                = aws_ecs_cluster.this.id
+  task_definition        = aws_ecs_task_definition.this.arn
+  desired_count          = var.desired_count
+  launch_type            = var.use_spot ? null : "FARGATE"
+  platform_version       = "1.4.0"
+  enable_execute_command = false
+
   health_check_grace_period_seconds  = 60
-  enable_execute_command             = var.environment != "prod" ? true : false
+  deployment_minimum_healthy_percent = 100
+  deployment_maximum_percent         = 200
+  propagate_tags                     = "SERVICE"
 
   dynamic "capacity_provider_strategy" {
     for_each = var.use_spot ? [1] : []
+
     content {
       capacity_provider = "FARGATE_SPOT"
       weight            = 1
+      base              = 0
     }
   }
 
@@ -248,20 +431,16 @@ resource "aws_ecs_service" "this" {
     rollback = true
   }
 
-  deployment_controller {
-    type = "ECS"
-  }
-
   tags = var.tags
 
+  # Autoscaling owns the count after the first apply.
   lifecycle {
-    ignore_changes = [desired_count, task_definition]
+    ignore_changes = [desired_count]
   }
+
+  depends_on = [aws_lb_listener.http]
 }
 
-# ---------------------------------------------------------
-# Auto Scaling
-# ---------------------------------------------------------
 resource "aws_appautoscaling_target" "this" {
   max_capacity       = var.max_capacity
   min_capacity       = var.min_capacity
@@ -271,7 +450,7 @@ resource "aws_appautoscaling_target" "this" {
 }
 
 resource "aws_appautoscaling_policy" "cpu" {
-  name               = "${var.name}-cpu-scaling"
+  name               = "${var.name}-cpu"
   policy_type        = "TargetTrackingScaling"
   resource_id        = aws_appautoscaling_target.this.resource_id
   scalable_dimension = aws_appautoscaling_target.this.scalable_dimension
@@ -281,8 +460,28 @@ resource "aws_appautoscaling_policy" "cpu" {
     predefined_metric_specification {
       predefined_metric_type = "ECSServiceAverageCPUUtilization"
     }
+
     target_value       = 70
     scale_in_cooldown  = 300
     scale_out_cooldown = 60
   }
+}
+
+resource "aws_cloudwatch_metric_alarm" "alb_5xx" {
+  alarm_name          = "${var.name}-alb-5xx"
+  alarm_description   = "Target 5xx responses from ${var.name}. See docs/sre/runbook-alb-5xx.md."
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "HTTPCode_Target_5XX_Count"
+  namespace           = "AWS/ApplicationELB"
+  period              = 60
+  statistic           = "Sum"
+  threshold           = 10
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    LoadBalancer = aws_lb.this.arn_suffix
+  }
+
+  tags = var.tags
 }

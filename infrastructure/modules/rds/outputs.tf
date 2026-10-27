@@ -1,29 +1,24 @@
 output "db_instance_id" {
-  description = "RDS instance identifier"
+  description = "RDS instance identifier."
   value       = aws_db_instance.this.id
 }
 
-output "db_endpoint" {
-  description = "RDS instance endpoint"
-  value       = aws_db_instance.this.endpoint
-}
-
 output "db_address" {
-  description = "RDS instance hostname"
+  description = "Hostname of the instance. Reachable only from the application tasks."
   value       = aws_db_instance.this.address
 }
 
 output "db_port" {
-  description = "RDS instance port"
+  description = "Port the instance listens on."
   value       = aws_db_instance.this.port
 }
 
 output "db_name" {
-  description = "Database name"
+  description = "Initial database name."
   value       = aws_db_instance.this.db_name
 }
 
 output "credentials_secret_arn" {
-  description = "ARN of the Secrets Manager secret holding DB credentials"
-  value       = aws_secretsmanager_secret.db_credentials.arn
+  description = "Secrets Manager ARN of the RDS-managed master secret. The value is not an output."
+  value       = aws_db_instance.this.master_user_secret[0].secret_arn
 }
