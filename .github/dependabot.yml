@@ -36,3 +36,23 @@ updates:
     directory: /infrastructure/environments/prod
     schedule:
       interval: weekly
+  - package-ecosystem: terraform
+    directory: /infrastructure/modules/vpc
+    schedule:
+      interval: weekly
+  - package-ecosystem: terraform
+    directory: /infrastructure/modules/security-groups
+    schedule:
+      interval: weekly
+  - package-ecosystem: terraform
+    directory: /infrastructure/modules/rds
+    schedule:
+      interval: weekly
+  - package-ecosystem: terraform
+    directory: /infrastructure/modules/workload
+    schedule:
+      interval: weekly
+  - package-ecosystem: terraform
+    directory: /infrastructure/modules/ci-policies
+    schedule:
+      interval: weekly

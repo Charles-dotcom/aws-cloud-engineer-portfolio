@@ -1,3 +1,6 @@
+SHELL := bash
+.SHELLFLAGS := -euo pipefail -c
+
 .DEFAULT_GOAL := help
 
 export TF_PLUGIN_CACHE_DIR := $(CURDIR)/.terraform.d/plugin-cache
@@ -9,7 +12,9 @@ TF_ROOTS := infrastructure/bootstrap \
 
 TF_TESTS := infrastructure/modules/vpc \
 	infrastructure/modules/security-groups \
-	infrastructure/modules/rds
+	infrastructure/modules/rds \
+	infrastructure/modules/workload \
+	infrastructure/modules/ci-policies
 
 .PHONY: help fmt fmt-check validate lint test python-test terraform-test security check
 
@@ -50,7 +55,12 @@ python-test: .venv/bin/pytest
 
 terraform-test:
 	@mkdir -p "$(TF_PLUGIN_CACHE_DIR)"
-	@for dir in $(TF_TESTS); do \
+	@# ci-policies renders IAM JSON locally. Dummy keys satisfy the provider
+	@# when the shell has no AWS credentials. Real keys are left as they are.
+	@export AWS_ACCESS_KEY_ID="$${AWS_ACCESS_KEY_ID:-test}"; \
+	export AWS_SECRET_ACCESS_KEY="$${AWS_SECRET_ACCESS_KEY:-test}"; \
+	export AWS_EC2_METADATA_DISABLED=true; \
+	for dir in $(TF_TESTS); do \
 		echo "==> $$dir"; \
 		terraform -chdir=$$dir init -backend=false -input=false -no-color; \
 		terraform -chdir=$$dir test -no-color; \
