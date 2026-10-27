@@ -1,0 +1,38 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: pip
+    directory: /apps/api
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: /apps/api
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: /apps/multi-container-app/api
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: /apps/multi-container-app/nginx
+    schedule:
+      interval: weekly
+  - package-ecosystem: terraform
+    directory: /infrastructure/bootstrap
+    schedule:
+      interval: weekly
+  - package-ecosystem: terraform
+    directory: /infrastructure/environments/dev
+    schedule:
+      interval: weekly
+  - package-ecosystem: terraform
+    directory: /infrastructure/environments/staging
+    schedule:
+      interval: weekly
+  - package-ecosystem: terraform
+    directory: /infrastructure/environments/prod
+    schedule:
+      interval: weekly
