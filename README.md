@@ -2,7 +2,12 @@
 
 **Charles Mphahlele** · Senior DevOps Engineer · Johannesburg, South Africa
 
-[LinkedIn](https://www.linkedin.com/in/charles-mphahlele-b029791b4) · [charlesmphahlele5@gmail.com](mailto:charlesmphahlele5@gmail.com)
+## Contact
+
+- Phone: [+27 60 117 2101](tel:+27601172101)
+- GitHub: [github.com/Charles-dotcom](https://github.com/Charles-dotcom)
+- LinkedIn: [charles-mphahlele-b029791b4](https://www.linkedin.com/in/charles-mphahlele-b029791b4)
+- Email: [charlesmphahlele5@gmail.com](mailto:charlesmphahlele5@gmail.com)
 
 This repository is a small AWS platform a client can read end to end. Terraform builds a VPC, an Application Load Balancer, an ECS Fargate service and a private PostgreSQL database, with remote state, a lock table and GitHub Actions roles that assume AWS through OIDC. Development stays cheap. Production refuses to plan unless it has three zones, a NAT gateway per zone, Multi-AZ, deletion protection, access logs and a certificate. Nothing here has been applied. `make check` formats, validates, lints, tests and scans without creating a resource or spending money.
 

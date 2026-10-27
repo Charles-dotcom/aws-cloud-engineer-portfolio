@@ -36,4 +36,4 @@ This is not an official AWS Well-Architected review.
 
 ## History
 
-The original commit contains a phone number in the README and a local Compose password (`appsecret`) that gitleaks did not flag. No cloud access key was found. History has not been rewritten. Do not reuse that Compose password.
+The original commit contains a local Compose password (`appsecret`) that gitleaks did not flag. No cloud access key was found. Do not reuse that Compose password.
