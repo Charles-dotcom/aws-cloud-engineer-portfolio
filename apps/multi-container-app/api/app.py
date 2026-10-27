@@ -1,24 +1,24 @@
-from flask import Flask, jsonify
 import os
 import socket
-from datetime import datetime
+from datetime import datetime, timezone
+
+from flask import Flask, jsonify
 
 app = Flask(__name__)
 
-@app.route('/')
+
+@app.get("/")
 def index():
-    return jsonify({
-        "message": "Multi-container demo running behind Nginx!",
-        "service": "backend-api",
-        "author": "Charles Mphahlele",
-        "timestamp": datetime.utcnow().isoformat(),
-        "hostname": socket.gethostname()
-    })
+    return jsonify(
+        message="Multi-container demo running behind Nginx.",
+        service="backend-api",
+        author="Charles Mphahlele",
+        time=datetime.now(timezone.utc).isoformat(),
+        hostname=socket.gethostname(),
+        environment=os.getenv("ENVIRONMENT", "local"),
+    )
 
-@app.route('/health')
+
+@app.get("/health")
 def health():
-    return jsonify({"status": "healthy", "service": "multi-container-api"})
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
+    return jsonify(status="healthy")
