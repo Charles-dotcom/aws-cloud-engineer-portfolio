@@ -95,6 +95,12 @@ variable "kms_key_arn" {
   default     = ""
 }
 
+variable "permissions_boundary_arn" {
+  description = "Permissions boundary for the flow-log role. Empty when flow logs are off."
+  type        = string
+  default     = ""
+}
+
 variable "tags" {
   description = "Tags merged onto every resource. Name is added per resource."
   type        = map(string)

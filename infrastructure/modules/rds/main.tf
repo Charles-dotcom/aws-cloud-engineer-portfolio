@@ -32,19 +32,13 @@ resource "aws_db_parameter_group" "this" {
   }
 
   tags = var.tags
-
-  lifecycle {
-    precondition {
-      condition     = var.max_allocated_storage >= var.allocated_storage
-      error_message = "max_allocated_storage must be at least allocated_storage."
-    }
-  }
 }
 
 resource "aws_iam_role" "monitoring" {
   count = var.monitoring_interval > 0 ? 1 : 0
 
-  name = "${var.name}-rds-monitoring"
+  name                 = "${var.name}-rds-monitoring"
+  permissions_boundary = var.permissions_boundary_arn != "" ? var.permissions_boundary_arn : null
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"

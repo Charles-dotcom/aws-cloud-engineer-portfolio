@@ -191,6 +191,7 @@ resource "aws_s3_bucket" "access_logs" {
   #checkov:skip=CKV_AWS_18:This bucket is the access-log destination. It does not log to itself.
   #checkov:skip=CKV_AWS_144:Cross-region replication of access logs is a cost decision and is not enabled here
   #checkov:skip=CKV2_AWS_62:Event notifications are not required to retain access logs
+  #checkov:skip=CKV_AWS_145:ALB access logs only support SSE-S3. A customer managed key makes enabling the logs fail. https://docs.aws.amazon.com/elasticloadbalancing/latest/application/enable-access-logging.html
   count = var.enable_access_logs ? 1 : 0
 
   bucket = "${var.name}-alb-logs-${var.account_id}"
@@ -230,17 +231,17 @@ resource "aws_s3_bucket_versioning" "access_logs" {
   }
 }
 
+# trivy:ignore:AVD-AWS-0132 ALB access logs only support SSE-S3. A customer managed key makes the load balancer refuse to enable logging. https://docs.aws.amazon.com/elasticloadbalancing/latest/application/enable-access-logging.html
 resource "aws_s3_bucket_server_side_encryption_configuration" "access_logs" {
+  #checkov:skip=CKV_AWS_145:ALB access logs only support SSE-S3. A customer managed key makes enabling the logs fail. https://docs.aws.amazon.com/elasticloadbalancing/latest/application/enable-access-logging.html
   count = var.enable_access_logs ? 1 : 0
 
   bucket = aws_s3_bucket.access_logs[0].id
 
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm     = "aws:kms"
-      kms_master_key_id = var.kms_key_arn
+      sse_algorithm = "AES256"
     }
-    bucket_key_enabled = true
   }
 }
 
@@ -277,13 +278,23 @@ data "aws_iam_policy_document" "access_logs" {
       identifiers = ["logdelivery.elasticloadbalancing.amazonaws.com"]
     }
 
+    # The prefix must match aws_lb.access_logs.prefix. ELB checks this
+    # policy when logging is turned on. SSE-S3 is the only encryption
+    # ALB access logs accept.
+    # https://docs.aws.amazon.com/elasticloadbalancing/latest/application/enable-access-logging.html
     actions   = ["s3:PutObject"]
-    resources = ["${aws_s3_bucket.access_logs[0].arn}/AWSLogs/${var.account_id}/*"]
+    resources = ["${aws_s3_bucket.access_logs[0].arn}/${var.name}/AWSLogs/${var.account_id}/*"]
 
     condition {
       test     = "StringEquals"
       variable = "aws:SourceAccount"
       values   = [var.account_id]
+    }
+
+    condition {
+      test     = "ArnLike"
+      variable = "aws:SourceArn"
+      values   = ["arn:aws:elasticloadbalancing:${var.region}:${var.account_id}:loadbalancer/*"]
     }
   }
 
@@ -482,6 +493,8 @@ resource "aws_cloudwatch_metric_alarm" "alb_5xx" {
   dimensions = {
     LoadBalancer = aws_lb.this.arn_suffix
   }
+
+  alarm_actions = var.alarm_sns_topic_arn != "" ? [var.alarm_sns_topic_arn] : []
 
   tags = var.tags
 }

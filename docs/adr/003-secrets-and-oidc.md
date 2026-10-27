@@ -21,6 +21,12 @@ The GitHub thumbprint on the OIDC provider is `6938fd4d98bab03faadb97b34396831e3
 
 ## Consequences
 
-A plan from a pull request can still write the state object, because Terraform refreshes state during plan. That is narrower than a wildcard apply, and it is still a reason to protect `main` and to review plans. The apply policy embeds the plan policy. Inline policies share a 10,240 character quota. The rendered size depends on the account id, so it was not measured here. If apply later fails with a policy-size error, split the document into customer managed policies.
+`terraform plan` reads state and writes the lock. It does not save state. The plan role can `s3:GetObject` on `environments/*` and `PutItem`/`DeleteItem` on the lock table. It cannot `s3:PutObject` or `s3:DeleteObject` on the state bucket, so a pull request cannot delete state or its versions.
 
-The password can still appear in Terraform state inside the RDS master-user secret metadata. It is not in git. Restrict state-bucket access to the plan and apply roles.
+Each apply role writes only `environments/<name>/` in the state bucket. Workload resources are named `{project}-{environment}-*`, and deletes of RDS, the load balancer, ECS, logs and the workload key require the `Environment` tag. The dev role has no prod ARN. `iam:CreateRole`, `PutRolePolicy` and `AttachRolePolicy` require the workload permissions boundary, and `AttachRolePolicy` may only attach `AmazonECSTaskExecutionRolePolicy` or `AmazonRDSEnhancedMonitoringRole`. An explicit deny blocks `iam:*` on `portfolio-gha-*` and on the GitHub OIDC provider. Apply does not manage that provider. Bootstrap, run locally, does.
+
+EC2 create and delete stay scoped to the configured region, not to an environment tag. Tag conditions on every networking call fail the first apply, because routes and associations are not created with the environment tag. A dev apply can still change a network it can name. It cannot delete the prod database, the prod load balancer, or the state key.
+
+The RDS master-user secret in state contains `secret_arn`, `kms_key_id` and `secret_status`. It does not contain the password. The password stays in Secrets Manager.
+
+Inline policies share a 10,240 character quota. These documents are split by environment so each one is smaller. If apply later fails with a policy-size error, split the document into customer managed policies.

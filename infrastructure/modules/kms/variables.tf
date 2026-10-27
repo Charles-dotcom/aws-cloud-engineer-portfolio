@@ -50,6 +50,12 @@ variable "service_principals" {
   default     = []
 }
 
+variable "prevent_destroy" {
+  description = "When true, Terraform refuses to destroy the key. Use this for prod and for the state key. Leave it false in dev so that stack can be torn down."
+  type        = bool
+  default     = false
+}
+
 variable "tags" {
   description = "Tags applied to the key."
   type        = map(string)

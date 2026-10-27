@@ -11,9 +11,10 @@ data "aws_iam_policy_document" "ecs_tasks_trust" {
 }
 
 resource "aws_iam_role" "ecs_task_execution" {
-  name               = "${var.name}-ecs-exec"
-  description        = "Lets the ECS agent pull images, write logs and read the database secret."
-  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_trust.json
+  name                 = "${var.name}-ecs-exec"
+  description          = "Lets the ECS agent pull images, write logs and read the database secret."
+  assume_role_policy   = data.aws_iam_policy_document.ecs_tasks_trust.json
+  permissions_boundary = var.permissions_boundary_arn != "" ? var.permissions_boundary_arn : null
 
   tags = var.tags
 }
@@ -57,9 +58,10 @@ resource "aws_iam_role_policy" "execution_secrets" {
 
 # The application itself has no AWS permissions. Add a policy when a feature needs one.
 resource "aws_iam_role" "ecs_task" {
-  name               = "${var.name}-ecs-task"
-  description        = "Runtime role for the application. Empty by default."
-  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_trust.json
+  name                 = "${var.name}-ecs-task"
+  description          = "Runtime role for the application. Empty by default."
+  assume_role_policy   = data.aws_iam_policy_document.ecs_tasks_trust.json
+  permissions_boundary = var.permissions_boundary_arn != "" ? var.permissions_boundary_arn : null
 
   tags = var.tags
 }

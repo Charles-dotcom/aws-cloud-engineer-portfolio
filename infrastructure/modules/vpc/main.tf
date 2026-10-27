@@ -155,7 +155,8 @@ resource "aws_cloudwatch_log_group" "flow_log" {
 resource "aws_iam_role" "flow_log" {
   count = var.enable_flow_logs ? 1 : 0
 
-  name = "${var.name}-vpc-flow-logs"
+  name                 = "${var.name}-vpc-flow-logs"
+  permissions_boundary = var.permissions_boundary_arn != "" ? var.permissions_boundary_arn : null
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"

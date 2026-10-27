@@ -13,7 +13,7 @@ terraform plan
 terraform apply
 ```
 
-The first state file is local. Copy the outputs: state bucket, lock table, KMS key ARN, plan role ARN, apply role ARNs.
+The first state file is local. Copy the outputs: state bucket, lock table, KMS key ARN, plan role ARN, apply role ARNs, and the workload boundary ARN.
 
 Then copy `backend.s3.tf.example` to `backend.s3.tf`, replace `ACCOUNT_ID` and `KEY_ID`, and run:
 
@@ -23,17 +23,9 @@ terraform init -migrate-state
 
 `terraform.tfvars` and `backend.s3.tf` are gitignored.
 
-## 2. Build the image
+## 2. Create the repository, then push the image
 
-The service rejects a `:latest` tag. ECR is immutable. From `apps/api`, build and push an immutable tag to the repository the dev stack will create, or push to a repository you already have and set `container_image` to that URI. The example is:
-
-```text
-ACCOUNT_ID.dkr.ecr.af-south-1.amazonaws.com/portfolio-dev:1.0.0
-```
-
-The account id is the one from `aws sts get-caller-identity`. Do not commit it.
-
-## 3. Dev root
+The ECR repository and the ECS service are the same apply. The tasks cannot start until an immutable image is already in the repository. Do it in three steps. The service rejects a `:latest` tag and an untagged URI.
 
 ```bash
 cd infrastructure/environments/dev
@@ -41,9 +33,29 @@ cp terraform.tfvars.example terraform.tfvars
 cp backend.hcl.example backend.hcl
 ```
 
-Replace `ACCOUNT_ID` and `KEY_ID`. Set `container_image` to the tag you pushed. Then `terraform init -backend-config=backend.hcl` and `terraform plan`. Apply only if you accept the cost.
+Replace `ACCOUNT_ID` and `KEY_ID` in those files. Set `permissions_boundary_arn` from the bootstrap output. Set `container_image` to the URI you are about to push. The account id is the one from `aws sts get-caller-identity`. Do not commit it.
 
-Staging and prod are the same shape. Prod will not plan without an ACM certificate ARN in `af-south-1`.
+```bash
+terraform init -backend-config=backend.hcl
+terraform apply -target=module.workload.module.ecs.aws_ecr_repository.this
+```
+
+That creates an empty repository and nothing else. Build and push from `apps/api`:
+
+```bash
+aws ecr get-login-password --region af-south-1 \
+  | docker login --username AWS --password-stdin ACCOUNT_ID.dkr.ecr.af-south-1.amazonaws.com
+docker build -t ACCOUNT_ID.dkr.ecr.af-south-1.amazonaws.com/portfolio-dev:1.0.0 .
+docker push ACCOUNT_ID.dkr.ecr.af-south-1.amazonaws.com/portfolio-dev:1.0.0
+```
+
+Then run a full `terraform apply` in the dev directory. Later pushes can use the `Build and push dev image` job, which is off until `TF_APPLY_ENABLED` is `true`. It pushes `portfolio-dev:<git sha>`. Point `CONTAINER_IMAGE` at that tag before the next apply.
+
+## 3. Dev root
+
+Plan before you apply, and only apply if you accept the cost in the README.
+
+Staging is the same shape and is not wired to CI. Prod will not plan without an ACM certificate ARN in `af-south-1`, and its apply role cannot change dev.
 
 ## 4. OIDC subject
 

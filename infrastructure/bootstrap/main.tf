@@ -24,6 +24,7 @@ module "kms" {
   region                  = var.aws_region
   deletion_window_in_days = 30
   service_principals      = ["dynamodb.amazonaws.com"]
+  prevent_destroy         = true
   tags = {
     Name = "${var.project}-tfstate"
   }

@@ -170,6 +170,18 @@ variable "apply_immediately" {
   type        = bool
 }
 
+variable "permissions_boundary_arn" {
+  description = "Permissions boundary the apply role must attach to every role in this environment. From the bootstrap output."
+  type        = string
+  default     = ""
+}
+
+variable "alarm_sns_topic_arn" {
+  description = "Optional SNS topic for the load-balancer 5xx alarm. Empty leaves the alarm with no action."
+  type        = string
+  default     = ""
+}
+
 variable "tags" {
   description = "Tags applied to every resource in the stack."
   type        = map(string)

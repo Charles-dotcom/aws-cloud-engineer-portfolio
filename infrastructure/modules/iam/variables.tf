@@ -24,6 +24,12 @@ variable "kms_key_arn" {
   type        = string
 }
 
+variable "permissions_boundary_arn" {
+  description = "Permissions boundary required on roles this stack creates. Empty only for local plans before bootstrap has produced the boundary."
+  type        = string
+  default     = ""
+}
+
 variable "tags" {
   description = "Tags applied to the roles."
   type        = map(string)

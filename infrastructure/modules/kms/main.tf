@@ -78,6 +78,19 @@ data "aws_iam_policy_document" "key" {
 }
 
 resource "aws_kms_key" "this" {
+  count = var.prevent_destroy ? 0 : 1
+
+  description             = var.description
+  deletion_window_in_days = var.deletion_window_in_days
+  enable_key_rotation     = true
+  policy                  = data.aws_iam_policy_document.key.json
+
+  tags = var.tags
+}
+
+resource "aws_kms_key" "protected" {
+  count = var.prevent_destroy ? 1 : 0
+
   description             = var.description
   deletion_window_in_days = var.deletion_window_in_days
   enable_key_rotation     = true
@@ -90,7 +103,12 @@ resource "aws_kms_key" "this" {
   }
 }
 
+locals {
+  key_id  = one(concat(aws_kms_key.this[*].key_id, aws_kms_key.protected[*].key_id))
+  key_arn = one(concat(aws_kms_key.this[*].arn, aws_kms_key.protected[*].arn))
+}
+
 resource "aws_kms_alias" "this" {
   name          = "alias/${var.name}"
-  target_key_id = aws_kms_key.this.key_id
+  target_key_id = local.key_id
 }

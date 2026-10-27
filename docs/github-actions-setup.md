@@ -16,11 +16,16 @@ Plan and apply are off. They start only when repository variables are the string
 | `TF_LOCK_TABLE` | Lock table name. |
 | `TF_STATE_KMS_KEY_ARN` | State key ARN. |
 | `AWS_REGION` | Optional. Defaults to `af-south-1`. |
+| `TF_PERMISSIONS_BOUNDARY_ARN` | Workload boundary from the bootstrap output. Required for apply. |
 | `CONTAINER_IMAGE` | Immutable image URI for dev. |
 | `CONTAINER_IMAGE_PROD` | Immutable image URI for prod. |
 | `CERTIFICATE_ARN` | ACM certificate for prod. |
 
-Create GitHub environments named `dev` and `prod` and add yourself as a required reviewer before you set the apply variables. Apply downloads the plan artefact from the plan job. It does not plan again.
+Create GitHub environments named `dev` and `prod` and add yourself as a required reviewer before you set the apply variables. Apply plans again inside that environment. It does not download a plan artefact. This repository is public, so the plan log is public and includes the account id and resource ARNs. Do not turn plan or apply on unless you accept that.
+
+`TF_APPLY_ENABLED` also turns on a dev image job that builds `apps/api`, scans it with Trivy, and pushes `portfolio-dev:<git sha>` to ECR. The repository must already exist. See [the first-apply sequence](oidc-aws-setup.md).
+
+A push to `main` does not cancel a running apply. A new pull request run does cancel the previous run on that pull request.
 
 Fork pull requests cannot assume the plan role. The workflow does not comment on the pull request, so it does not need `pull-requests: write`.
 

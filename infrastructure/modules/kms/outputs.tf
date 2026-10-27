@@ -1,11 +1,11 @@
 output "key_arn" {
   description = "ARN of the customer managed key."
-  value       = aws_kms_key.this.arn
+  value       = local.key_arn
 }
 
 output "key_id" {
   description = "ID of the customer managed key."
-  value       = aws_kms_key.this.key_id
+  value       = local.key_id
 }
 
 output "alias_name" {

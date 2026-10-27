@@ -27,5 +27,6 @@ instance_class         = "db.t3.medium"
 # rejects an empty certificate.
 certificate_arn = "arn:aws:acm:af-south-1:ACCOUNT_ID:certificate/REPLACE_ME"
 container_image = "ACCOUNT_ID.dkr.ecr.af-south-1.amazonaws.com/portfolio-prod:1.0.0"
+permissions_boundary_arn = "arn:aws:iam::ACCOUNT_ID:policy/portfolio-workload-boundary"
 db_name         = "app"
 db_username     = "app"
