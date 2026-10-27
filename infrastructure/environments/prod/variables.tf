@@ -198,3 +198,15 @@ variable "apply_immediately" {
   type        = bool
   default     = false
 }
+
+variable "permissions_boundary_arn" {
+  description = "Workload permissions boundary from the bootstrap output. Required before an apply that creates roles."
+  type        = string
+  default     = ""
+}
+
+variable "alarm_sns_topic_arn" {
+  description = "Optional SNS topic for the 5xx alarm."
+  type        = string
+  default     = ""
+}

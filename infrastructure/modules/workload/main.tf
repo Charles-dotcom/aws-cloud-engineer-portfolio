@@ -36,6 +36,7 @@ module "kms" {
   account_id              = local.account_id
   region                  = var.aws_region
   deletion_window_in_days = var.environment == "prod" ? 30 : 7
+  prevent_destroy         = var.environment == "prod"
   service_principals = [
     "rds.amazonaws.com",
     "secretsmanager.amazonaws.com",
@@ -47,18 +48,19 @@ module "kms" {
 module "vpc" {
   source = "../vpc"
 
-  name                    = local.name
-  cidr_block              = var.vpc_cidr
-  availability_zones      = var.availability_zones
-  public_subnet_cidrs     = var.public_subnet_cidrs
-  private_subnet_cidrs    = var.private_subnet_cidrs
-  region                  = var.aws_region
-  account_id              = local.account_id
-  single_nat_gateway      = var.single_nat_gateway
-  enable_flow_logs        = var.enable_flow_logs
-  flow_log_retention_days = var.flow_log_retention_days
-  kms_key_arn             = module.kms.key_arn
-  tags                    = var.tags
+  name                     = local.name
+  cidr_block               = var.vpc_cidr
+  availability_zones       = var.availability_zones
+  public_subnet_cidrs      = var.public_subnet_cidrs
+  private_subnet_cidrs     = var.private_subnet_cidrs
+  region                   = var.aws_region
+  account_id               = local.account_id
+  single_nat_gateway       = var.single_nat_gateway
+  enable_flow_logs         = var.enable_flow_logs
+  flow_log_retention_days  = var.flow_log_retention_days
+  kms_key_arn              = module.kms.key_arn
+  permissions_boundary_arn = var.permissions_boundary_arn
+  tags                     = var.tags
 }
 
 module "security_groups" {
@@ -87,6 +89,7 @@ module "rds" {
   apply_immediately            = var.apply_immediately
   performance_insights_enabled = var.performance_insights_enabled
   monitoring_interval          = var.monitoring_interval
+  permissions_boundary_arn     = var.permissions_boundary_arn
   tags                         = var.tags
 
   depends_on = [terraform_data.prod_guardrails]
@@ -95,11 +98,12 @@ module "rds" {
 module "iam" {
   source = "../iam"
 
-  name         = local.name
-  region       = var.aws_region
-  secrets_arns = [module.rds.credentials_secret_arn]
-  kms_key_arn  = module.kms.key_arn
-  tags         = var.tags
+  name                     = local.name
+  region                   = var.aws_region
+  secrets_arns             = [module.rds.credentials_secret_arn]
+  kms_key_arn              = module.kms.key_arn
+  permissions_boundary_arn = var.permissions_boundary_arn
+  tags                     = var.tags
 }
 
 module "ecs" {
@@ -128,6 +132,7 @@ module "ecs" {
   enable_access_logs  = var.enable_alb_access_logs
   deletion_protection = var.deletion_protection
   log_retention_days  = var.log_retention_days
+  alarm_sns_topic_arn = var.alarm_sns_topic_arn
 
   environment_variables = [
     {

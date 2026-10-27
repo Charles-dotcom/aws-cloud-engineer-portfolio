@@ -19,5 +19,6 @@ desired_count          = 2
 instance_class         = "db.t3.small"
 
 container_image = "ACCOUNT_ID.dkr.ecr.af-south-1.amazonaws.com/portfolio-staging:1.0.0"
+permissions_boundary_arn = "arn:aws:iam::ACCOUNT_ID:policy/portfolio-workload-boundary"
 db_name         = "app"
 db_username     = "app"

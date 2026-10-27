@@ -23,6 +23,11 @@ output "plan_role_arn" {
   value       = aws_iam_role.plan.arn
 }
 
+output "workload_boundary_arn" {
+  description = "Permissions boundary for roles the environment apply creates. Pass it as permissions_boundary_arn."
+  value       = aws_iam_policy.workload_boundary.arn
+}
+
 output "apply_role_arns" {
   description = "Role ARN per GitHub environment. Store dev and prod as AWS_ROLE_ARN_APPLY_DEV and AWS_ROLE_ARN_APPLY_PROD."
   value       = { for env, role in aws_iam_role.apply : env => role.arn }

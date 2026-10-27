@@ -78,8 +78,11 @@ variable "container_image" {
   type        = string
 
   validation {
-    condition     = length(var.container_image) > 0 && !endswith(var.container_image, ":latest")
-    error_message = "container_image must be set and must not use the latest tag."
+    condition = (
+      can(regex("@sha256:[0-9a-f]{64}$", var.container_image)) ||
+      (can(regex(":[^/:@]+$", var.container_image)) && !endswith(var.container_image, ":latest"))
+    )
+    error_message = "container_image must be a digest (@sha256:...) or an immutable tag, and must not be latest or untagged."
   }
 }
 
@@ -186,6 +189,12 @@ variable "log_retention_days" {
     )
     error_message = "log_retention_days must be a CloudWatch Logs retention value."
   }
+}
+
+variable "alarm_sns_topic_arn" {
+  description = "Optional SNS topic ARN for the target 5xx alarm. Empty means the alarm has no action."
+  type        = string
+  default     = ""
 }
 
 variable "readonly_root_filesystem" {

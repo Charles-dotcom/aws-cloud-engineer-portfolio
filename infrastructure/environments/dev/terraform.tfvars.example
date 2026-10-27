@@ -22,5 +22,6 @@ multi_az           = false
 
 # Replace ACCOUNT_ID after bootstrap. Do not use the tag "latest".
 container_image = "ACCOUNT_ID.dkr.ecr.af-south-1.amazonaws.com/portfolio-dev:1.0.0"
+permissions_boundary_arn = "arn:aws:iam::ACCOUNT_ID:policy/portfolio-workload-boundary"
 db_name         = "app"
 db_username     = "app"

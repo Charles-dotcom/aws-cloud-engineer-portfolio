@@ -32,12 +32,6 @@ module "workload" {
   monitoring_interval          = var.monitoring_interval
   skip_final_snapshot          = var.skip_final_snapshot
   apply_immediately            = var.apply_immediately
-
-  tags = {
-    ManagedBy   = "Terraform"
-    Project     = var.project
-    Environment = var.environment
-    Owner       = var.owner
-    CostCenter  = var.cost_center
-  }
+  permissions_boundary_arn     = var.permissions_boundary_arn
+  alarm_sns_topic_arn          = var.alarm_sns_topic_arn
 }

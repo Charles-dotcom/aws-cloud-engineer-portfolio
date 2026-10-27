@@ -91,6 +91,17 @@ variable "max_allocated_storage" {
     condition     = var.max_allocated_storage >= 20 && var.max_allocated_storage <= 1000
     error_message = "max_allocated_storage must be between 20 and 1000 GiB."
   }
+
+  validation {
+    condition     = var.max_allocated_storage >= var.allocated_storage
+    error_message = "max_allocated_storage must be at least allocated_storage."
+  }
+}
+
+variable "permissions_boundary_arn" {
+  description = "Permissions boundary for the enhanced-monitoring role. Empty when monitoring is off."
+  type        = string
+  default     = ""
 }
 
 variable "multi_az" {
