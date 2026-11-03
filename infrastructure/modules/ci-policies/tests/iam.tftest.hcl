@@ -11,11 +11,13 @@ run "dev_apply_is_scoped" {
   command = plan
 
   variables {
-    account_id         = "000000000000"
-    aws_region         = "af-south-1"
-    project            = "portfolio"
-    github_repository  = "Charles-dotcom/aws-cloud-engineer-portfolio"
-    apply_environments = ["dev", "prod"]
+    account_id        = "000000000000"
+    aws_region        = "af-south-1"
+    project           = "portfolio"
+    github_repository = "Charles-dotcom/aws-cloud-engineer-portfolio"
+    # 12-digit account id and a 36-character key id. Both lengths are fixed,
+    # so this render is the same size as a real account.
+    apply_environments = ["dev", "staging", "prod"]
     state_bucket_name  = "portfolio-tfstate-000000000000"
     lock_table_name    = "portfolio-terraform-locks"
     state_kms_key_arn  = "arn:aws:kms:af-south-1:000000000000:key/11111111-1111-1111-1111-111111111111"
@@ -107,5 +109,29 @@ run "dev_apply_is_scoped" {
       )
     ])
     error_message = "AttachRolePolicy may only attach the ECS execution policy and the RDS monitoring policy."
+  }
+
+  assert {
+    condition = alltrue([
+      for env in ["dev", "staging", "prod"] :
+      length(output.apply_managed_policies[env]) <= 10 && alltrue([
+        for group, doc in output.apply_managed_policies[env] :
+        length(replace(replace(replace(replace(doc, " ", ""), "\n", ""), "\r", ""), "\t", "")) <= 6144
+      ])
+    ])
+    error_message = "Each apply role needs at most 10 managed policies, each at most 6144 characters with whitespace removed. ${jsonencode(output.policy_character_counts)}"
+  }
+
+  assert {
+    condition = (
+      output.policy_character_counts["plan"] <= 10240
+      && output.policy_character_counts["plan_trust"] <= 10240
+      && output.policy_character_counts["boundary"] <= 6144
+      && alltrue([
+        for env in ["dev", "staging", "prod"] :
+        output.policy_character_counts["apply_trust/${env}"] <= 10240
+      ])
+    )
+    error_message = "An inline policy must stay under 10240 characters and the boundary under 6144. ${jsonencode(output.policy_character_counts)}"
   }
 }

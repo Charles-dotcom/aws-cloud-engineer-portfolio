@@ -14,8 +14,23 @@ output "plan_json" {
 }
 
 output "apply_json" {
-  description = "Permissions policy for each apply role."
+  description = "Full permissions document for each apply role, before it is split for the managed-policy quota."
   value       = { for env, doc in data.aws_iam_policy_document.apply : env => doc.json }
+}
+
+output "apply_policy_groups" {
+  description = "Names of the customer managed policies attached to each apply role."
+  value       = keys(local.apply_groups)
+}
+
+output "apply_managed_policies" {
+  description = "Customer managed apply policies keyed by environment and group. Each document is at most 6144 non-whitespace characters."
+  value       = local.apply_managed_policies
+}
+
+output "policy_character_counts" {
+  description = "Non-whitespace character counts of the rendered plan, boundary, trust and apply policies."
+  value       = local.policy_character_counts
 }
 
 output "workload_boundary_json" {

@@ -597,3 +597,123 @@ data "aws_iam_policy_document" "apply" {
     }
   }
 }
+
+# The apply document above is what a reviewer reads. AWS will not store it as
+# one inline policy: a role's inline policies share 10,240 non-whitespace
+# characters, and one customer managed policy is 6,144.
+# https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_iam-quotas.html
+# Attachment splits the same statements into at most 10 managed policies.
+locals {
+  managed_policy_limit = 6144
+  inline_policy_limit  = 10240
+  max_managed_policies = 10
+
+  apply_groups = {
+    state = [
+      "DenyLongLivedIdentity",
+      "DenyCiRoleAndOidcChanges",
+      "DenyUnrelatedCompute",
+      "ReadStateBucket",
+      "ReadStateObjects",
+      "StateLock",
+      "StateKey",
+      "ReadThisStack",
+      "WriteOwnState",
+      "EncryptOwnState",
+      "DenyStateKeyDeletion",
+      "ManageBucketsForThisEnvironment",
+      "EcrAuth",
+    ]
+    identity = [
+      "CreateRolesForThisEnvironment",
+      "AttachKnownServicePolicies",
+      "PassRolesThisEnvironment",
+    ]
+    network = ["ManageNetworking"]
+    workload = [
+      "ManageWorkloadServices",
+      "CreateWorkloadServices",
+      "CreateKeyForThisEnvironment",
+    ]
+  }
+
+  apply_statements = {
+    for env, doc in data.aws_iam_policy_document.apply :
+    env => {
+      for statement in jsondecode(doc.json).Statement :
+      statement.Sid => statement
+    }
+  }
+
+  apply_managed_policies = {
+    for env in var.apply_environments : env => {
+      for group, sids in local.apply_groups :
+      group => jsonencode({
+        Version   = "2012-10-17"
+        Statement = [for sid in sids : local.apply_statements[env][sid]]
+      })
+    }
+  }
+
+  guarded_documents = merge(
+    {
+      for pair in setproduct(var.apply_environments, keys(local.apply_groups)) :
+      "apply/${pair[0]}/${pair[1]}" => local.apply_managed_policies[pair[0]][pair[1]]
+    },
+    {
+      plan       = data.aws_iam_policy_document.plan.json
+      boundary   = data.aws_iam_policy_document.workload_boundary.json
+      plan_trust = data.aws_iam_policy_document.plan_trust.json
+    },
+    {
+      for env, doc in data.aws_iam_policy_document.apply_trust :
+      "apply_trust/${env}" => doc.json
+    },
+  )
+
+  policy_character_counts = {
+    for name, doc in local.guarded_documents :
+    name => length(replace(replace(replace(replace(doc, " ", ""), "\n", ""), "\r", ""), "\t", ""))
+  }
+}
+
+resource "terraform_data" "policy_size" {
+  input = local.policy_character_counts
+
+  lifecycle {
+    precondition {
+      condition = (
+        length(local.apply_groups) <= local.max_managed_policies
+        && alltrue([
+          for name, size in local.policy_character_counts :
+          !startswith(name, "apply/") || size <= local.managed_policy_limit
+        ])
+        && local.policy_character_counts["boundary"] <= local.managed_policy_limit
+      )
+      error_message = "A customer managed policy exceeds 6144 non-whitespace characters, or an apply role would have more than 10. ${jsonencode(local.policy_character_counts)}"
+    }
+
+    precondition {
+      condition = (
+        local.policy_character_counts["plan"] <= local.inline_policy_limit
+        && local.policy_character_counts["plan_trust"] <= local.inline_policy_limit
+        && alltrue([
+          for name, size in local.policy_character_counts :
+          !startswith(name, "apply_trust/") || size <= local.inline_policy_limit
+        ])
+      )
+      error_message = "An inline policy exceeds 10240 non-whitespace characters. ${jsonencode(local.policy_character_counts)}"
+    }
+
+    precondition {
+      condition = (
+        length(flatten(values(local.apply_groups))) == length(toset(flatten(values(local.apply_groups))))
+        && alltrue([
+          for env in var.apply_environments :
+          toset(keys(local.apply_statements[env])) == toset(flatten(values(local.apply_groups)))
+        ])
+      )
+      error_message = "Every apply statement must be in exactly one managed policy."
+    }
+  }
+}
