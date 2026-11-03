@@ -3,6 +3,7 @@ data "aws_caller_identity" "current" {}
 locals {
   account_id = data.aws_caller_identity.current.account_id
   name       = "${var.project}-${var.environment}"
+  tags       = merge(var.tags, { Environment = var.environment })
 }
 
 resource "terraform_data" "prod_guardrails" {
@@ -60,7 +61,7 @@ module "vpc" {
   flow_log_retention_days  = var.flow_log_retention_days
   kms_key_arn              = module.kms.key_arn
   permissions_boundary_arn = var.permissions_boundary_arn
-  tags                     = var.tags
+  tags                     = local.tags
 }
 
 module "security_groups" {
@@ -69,7 +70,7 @@ module "security_groups" {
   name     = local.name
   vpc_id   = module.vpc.vpc_id
   app_port = var.container_port
-  tags     = var.tags
+  tags     = local.tags
 }
 
 module "rds" {

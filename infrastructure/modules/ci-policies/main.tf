@@ -6,6 +6,17 @@
 locals {
   # IAM policy ARNs are deterministic: account, the policy/ prefix, and the name.
   permissions_boundary_arn = "arn:aws:iam::${var.account_id}:policy/${var.project}-workload-boundary"
+
+  # EC2 writes below all have a resource type. This list is the only place an
+  # unconditioned EC2 write may appear, and only for an action whose resource
+  # column is empty.
+  # https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazonec2.html
+  ec2_actions_without_resource_permissions = []
+
+  ec2_resource_arns = [
+    for type in ["vpc", "subnet", "internet-gateway", "route-table", "elastic-ip", "natgateway", "security-group", "security-group-rule", "vpc-endpoint", "vpc-flow-log"] :
+    "arn:aws:ec2:${var.aws_region}:${var.account_id}:${type}/*"
+  ]
 }
 
 
@@ -281,31 +292,63 @@ data "aws_iam_policy_document" "apply" {
     ]
   }
 
+  # New resources are tagged with TagSpecifications. IfExists keeps a parent
+  # that already exists in this environment, and rejects a parent tagged for another.
   statement {
-    sid    = "ManageNetworking"
+    sid    = "CreateEc2Resources"
     effect = "Allow"
     actions = [
       "ec2:CreateVpc",
+      "ec2:CreateSubnet",
+      "ec2:CreateInternetGateway",
+      "ec2:CreateRouteTable",
+      "ec2:AllocateAddress",
+      "ec2:CreateNatGateway",
+      "ec2:CreateSecurityGroup",
+      "ec2:CreateVpcEndpoint",
+      "ec2:CreateFlowLogs",
+      "ec2:CreateTags",
+    ]
+    resources = local.ec2_resource_arns
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [var.aws_region]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/Environment"
+      values   = [each.value]
+    }
+
+    condition {
+      test     = "StringEqualsIfExists"
+      variable = "aws:ResourceTag/Environment"
+      values   = [each.value]
+    }
+  }
+
+  statement {
+    sid    = "ChangeEc2Resources"
+    effect = "Allow"
+    actions = [
       "ec2:DeleteVpc",
       "ec2:ModifyVpcAttribute",
-      "ec2:CreateSubnet",
       "ec2:DeleteSubnet",
       "ec2:ModifySubnetAttribute",
-      "ec2:CreateInternetGateway",
       "ec2:DeleteInternetGateway",
       "ec2:AttachInternetGateway",
       "ec2:DetachInternetGateway",
-      "ec2:CreateRouteTable",
       "ec2:DeleteRouteTable",
       "ec2:CreateRoute",
       "ec2:DeleteRoute",
+      "ec2:ReplaceRoute",
       "ec2:AssociateRouteTable",
       "ec2:DisassociateRouteTable",
-      "ec2:AllocateAddress",
       "ec2:ReleaseAddress",
-      "ec2:CreateNatGateway",
       "ec2:DeleteNatGateway",
-      "ec2:CreateSecurityGroup",
       "ec2:DeleteSecurityGroup",
       "ec2:AuthorizeSecurityGroupIngress",
       "ec2:AuthorizeSecurityGroupEgress",
@@ -314,20 +357,24 @@ data "aws_iam_policy_document" "apply" {
       "ec2:ModifySecurityGroupRules",
       "ec2:UpdateSecurityGroupRuleDescriptionsIngress",
       "ec2:UpdateSecurityGroupRuleDescriptionsEgress",
-      "ec2:CreateVpcEndpoint",
       "ec2:DeleteVpcEndpoints",
       "ec2:ModifyVpcEndpoint",
-      "ec2:CreateFlowLogs",
       "ec2:DeleteFlowLogs",
       "ec2:CreateTags",
       "ec2:DeleteTags",
     ]
-    resources = ["*"]
+    resources = local.ec2_resource_arns
 
     condition {
       test     = "StringEquals"
       variable = "aws:RequestedRegion"
       values   = [var.aws_region]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/Environment"
+      values   = [each.value]
     }
   }
 
@@ -683,7 +730,10 @@ locals {
       "AttachKnownServicePolicies",
       "PassRolesThisEnvironment",
     ]
-    network = ["ManageNetworking"]
+    network = [
+      "CreateEc2Resources",
+      "ChangeEc2Resources",
+    ]
     tag = [
       "DenyForeignKmsEnvironmentTag",
       "DenyForeignEc2EnvironmentTag",
@@ -733,6 +783,7 @@ locals {
     for name, doc in local.guarded_documents :
     name => length(replace(replace(replace(replace(doc, " ", ""), "\n", ""), "\r", ""), "\t", ""))
   }
+
 }
 
 resource "terraform_data" "policy_size" {

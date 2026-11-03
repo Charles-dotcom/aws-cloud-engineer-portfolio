@@ -134,6 +134,17 @@ run "dev_apply_is_scoped" {
 
   assert {
     condition = alltrue([
+      for statement in jsondecode(data.aws_iam_policy_document.apply["dev"].json).Statement :
+      statement.Effect != "Allow" || alltrue([
+        for action in try(tolist(statement.Action), [statement.Action]) :
+        !strcontains(action, "ec2:") || strcontains(action, "ec2:Describe") || contains(output.ec2_actions_without_resource_permissions, action) || try(statement.Condition.StringEquals["aws:RequestTag/Environment"], null) != null || try(statement.Condition.StringEquals["aws:ResourceTag/Environment"], null) != null
+      ])
+    ])
+    error_message = "The dev policy has an EC2 write with no Environment condition outside the no-resource-level allowlist."
+  }
+
+  assert {
+    condition = alltrue([
       for env in ["dev", "staging", "prod"] :
       length(output.apply_managed_policies[env]) <= 10 && alltrue([
         for group, doc in output.apply_managed_policies[env] :

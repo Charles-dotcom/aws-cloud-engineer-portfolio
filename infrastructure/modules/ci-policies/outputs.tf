@@ -18,6 +18,11 @@ output "apply_json" {
   value       = { for env, doc in data.aws_iam_policy_document.apply : env => doc.json }
 }
 
+output "ec2_actions_without_resource_permissions" {
+  description = "EC2 actions this module may allow without an Environment condition. Empty unless AWS gives the action no resource type."
+  value       = local.ec2_actions_without_resource_permissions
+}
+
 output "apply_policy_groups" {
   description = "Names of the customer managed policies attached to each apply role."
   value       = keys(local.apply_groups)
