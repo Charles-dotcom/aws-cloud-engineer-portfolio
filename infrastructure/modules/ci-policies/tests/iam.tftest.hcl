@@ -144,26 +144,10 @@ run "dev_apply_is_scoped" {
   }
 
   assert {
-    condition = alltrue([
-      for env in ["dev", "staging", "prod"] :
-      length(output.apply_managed_policies[env]) <= 10 && alltrue([
-        for group, doc in output.apply_managed_policies[env] :
-        length(replace(replace(replace(replace(doc, " ", ""), "\n", ""), "\r", ""), "\t", "")) <= 6144
-      ])
+    condition = alltrue([for env in ["dev", "staging", "prod"] : length(output.apply_managed_policies[env]) <= 10]) && alltrue([
+      for name, size in output.policy_character_counts :
+      size <= (startswith(name, "apply/") || name == "boundary" ? 6144 : 10240)
     ])
-    error_message = "Each apply role needs at most 10 managed policies, each at most 6144 characters with whitespace removed. ${jsonencode(output.policy_character_counts)}"
-  }
-
-  assert {
-    condition = (
-      output.policy_character_counts["plan"] <= 10240
-      && output.policy_character_counts["plan_trust"] <= 10240
-      && output.policy_character_counts["boundary"] <= 6144
-      && alltrue([
-        for env in ["dev", "staging", "prod"] :
-        output.policy_character_counts["apply_trust/${env}"] <= 10240
-      ])
-    )
-    error_message = "An inline policy must stay under 10240 characters and the boundary under 6144. ${jsonencode(output.policy_character_counts)}"
+    error_message = "A rendered policy exceeds 6144 characters for a managed policy or 10240 for an inline policy. ${jsonencode(output.policy_character_counts)}"
   }
 }

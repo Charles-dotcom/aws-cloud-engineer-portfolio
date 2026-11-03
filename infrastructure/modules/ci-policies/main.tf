@@ -7,9 +7,7 @@ locals {
   # IAM policy ARNs are deterministic: account, the policy/ prefix, and the name.
   permissions_boundary_arn = "arn:aws:iam::${var.account_id}:policy/${var.project}-workload-boundary"
 
-  # EC2 writes below all have a resource type. This list is the only place an
-  # unconditioned EC2 write may appear, and only for an action whose resource
-  # column is empty.
+  # Empty: every EC2 write below has a resource type.
   # https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazonec2.html
   ec2_actions_without_resource_permissions = []
 
@@ -197,25 +195,38 @@ data "aws_iam_policy_document" "workload_boundary" {
   #checkov:skip=CKV_AWS_111:The boundary is the maximum for task and monitoring roles. It is not an apply policy.
   #checkov:skip=CKV_AWS_108:The task role must read the database secret and decrypt it. This boundary is that ceiling, not an apply policy.
   statement {
-    sid    = "TaskAndMonitoring"
+    sid    = "NoResourceLevel"
     effect = "Allow"
     actions = [
       "ecr:GetAuthorizationToken",
+      "logs:DescribeLogGroups",
+      "logs:DescribeLogStreams",
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    sid    = "TaskAndMonitoring"
+    effect = "Allow"
+    actions = [
       "ecr:BatchCheckLayerAvailability",
       "ecr:GetDownloadUrlForLayer",
       "ecr:BatchGetImage",
       "logs:CreateLogGroup",
       "logs:CreateLogStream",
       "logs:PutLogEvents",
-      "logs:DescribeLogGroups",
-      "logs:DescribeLogStreams",
       "logs:PutRetentionPolicy",
       "secretsmanager:GetSecretValue",
       "kms:Decrypt",
       "kms:DescribeKey",
       "kms:GenerateDataKey",
     ]
-    resources = ["*"]
+    resources = [
+      "arn:aws:ecr:${var.aws_region}:${var.account_id}:repository/*",
+      "arn:aws:logs:${var.aws_region}:${var.account_id}:log-group:*",
+      "arn:aws:secretsmanager:${var.aws_region}:${var.account_id}:secret:*",
+      "arn:aws:kms:${var.aws_region}:${var.account_id}:key/*",
+    ]
   }
 
   statement {
@@ -292,8 +303,7 @@ data "aws_iam_policy_document" "apply" {
     ]
   }
 
-  # New resources are tagged with TagSpecifications. IfExists keeps a parent
-  # that already exists in this environment, and rejects a parent tagged for another.
+  # TagSpecifications sets Environment. IfExists rejects a parent from another environment.
   statement {
     sid    = "CreateEc2Resources"
     effect = "Allow"
@@ -642,12 +652,16 @@ data "aws_iam_policy_document" "apply" {
         "vpc-flow-logs.amazonaws.com",
       ]
     }
+
+    condition {
+      test     = "StringEquals"
+      variable = "iam:PermissionsBoundary"
+      values   = [local.permissions_boundary_arn]
+    }
   }
 
-  # TagResource with only aws:RequestTag/Environment would let this role retag
-  # another environment's key, then schedule its deletion. Deny that, and the
-  # same change to an EC2 resource that already exists (ec2:CreateAction is set
-  # only while the resource is being created).
+  # RequestTag alone would let this role retag another environment's key.
+  # ec2:CreateAction is set only while the EC2 resource is being created.
   statement {
     sid    = "DenyForeignKmsEnvironmentTag"
     effect = "Deny"
@@ -699,11 +713,8 @@ data "aws_iam_policy_document" "apply" {
   }
 }
 
-# The apply document above is what a reviewer reads. AWS will not store it as
-# one inline policy: a role's inline policies share 10,240 non-whitespace
-# characters, and one customer managed policy is 6,144.
+# Split for the managed-policy quota: 6144 non-whitespace characters, 10 per role.
 # https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_iam-quotas.html
-# Attachment splits the same statements into at most 10 managed policies.
 locals {
   managed_policy_limit = 6144
   inline_policy_limit  = 10240
@@ -784,45 +795,35 @@ locals {
     name => length(replace(replace(replace(replace(doc, " ", ""), "\n", ""), "\r", ""), "\t", ""))
   }
 
+  # Plan read patterns, plus kms:CreateKey and ecr:GetAuthorizationToken, which have no resource ARN.
+  # https://docs.aws.amazon.com/service-authorization/latest/reference/reference_policies_actions-resources-contextkeys.html
+  actions_without_resource_level_permissions = split(",", "ec2:Describe*,elasticloadbalancing:Describe*,ecs:Describe*,ecs:List*,ecr:Describe*,ecr:Get*,ecr:List*,ecr:GetAuthorizationToken,rds:Describe*,rds:List*,logs:Describe*,logs:List*,logs:DescribeLogGroups,logs:DescribeLogStreams,iam:Get*,iam:List*,kms:Describe*,kms:Get*,kms:List*,kms:CreateKey,secretsmanager:Describe*,secretsmanager:List*,secretsmanager:GetResourcePolicy,application-autoscaling:Describe*,cloudwatch:Describe*,cloudwatch:List*,s3:ListAllMyBuckets")
 }
 
-resource "terraform_data" "policy_size" {
-  input = local.policy_character_counts
+module "policy_guard" {
+  source = "../policy-guard"
 
+  documents = local.guarded_documents
+  limits = {
+    for name, _ in local.guarded_documents :
+    name => startswith(name, "apply/") || name == "boundary" ? local.managed_policy_limit : local.inline_policy_limit
+  }
+  resource_star_allowlist      = local.actions_without_resource_level_permissions
+  require_environment_tag_deny = [for env in var.apply_environments : "apply/${env}/tag"]
+}
+
+resource "terraform_data" "policy_partition" {
   lifecycle {
     precondition {
       condition = (
         length(local.apply_groups) <= local.max_managed_policies
-        && alltrue([
-          for name, size in local.policy_character_counts :
-          !startswith(name, "apply/") || size <= local.managed_policy_limit
-        ])
-        && local.policy_character_counts["boundary"] <= local.managed_policy_limit
-      )
-      error_message = "A customer managed policy exceeds 6144 non-whitespace characters, or an apply role would have more than 10. ${jsonencode(local.policy_character_counts)}"
-    }
-
-    precondition {
-      condition = (
-        local.policy_character_counts["plan"] <= local.inline_policy_limit
-        && local.policy_character_counts["plan_trust"] <= local.inline_policy_limit
-        && alltrue([
-          for name, size in local.policy_character_counts :
-          !startswith(name, "apply_trust/") || size <= local.inline_policy_limit
-        ])
-      )
-      error_message = "An inline policy exceeds 10240 non-whitespace characters. ${jsonencode(local.policy_character_counts)}"
-    }
-
-    precondition {
-      condition = (
-        length(flatten(values(local.apply_groups))) == length(toset(flatten(values(local.apply_groups))))
+        && length(flatten(values(local.apply_groups))) == length(toset(flatten(values(local.apply_groups))))
         && alltrue([
           for env in var.apply_environments :
           toset(keys(local.apply_statements[env])) == toset(flatten(values(local.apply_groups)))
         ])
       )
-      error_message = "Every apply statement must be in exactly one managed policy."
+      error_message = "Every apply statement must be in exactly one of at most 10 managed policies."
     }
   }
 }
