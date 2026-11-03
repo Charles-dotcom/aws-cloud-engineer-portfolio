@@ -121,7 +121,7 @@ Tear down in this order. Destroy every environment before bootstrap, because the
 - Security groups have no inline rules, so Terraform removes AWS's default allow-all egress. Tasks may open 443 to the internet for AWS APIs through the NAT gateway. Interface VPC endpoints were left out on cost.
 - The plan role reads state and writes only the lock table. It does not save or delete state. See [ADR 003](docs/adr/003-secrets-and-oidc.md).
 - The database password is in Secrets Manager. State stores the secret ARN, the key id and the secret status, not the password. The application connects as the master user. A real workload would add a least-privilege database role. IAM database authentication is enabled so that role can be added without replacing the instance.
-- Apply roles are split by environment, cannot edit the CI roles, and can attach only two AWS service policies, under a permissions boundary.
+- Apply roles are split by environment, cannot edit the CI roles, and can attach only two AWS service policies, under a permissions boundary. EC2 writes require the environment tag, and each managed policy stays within 6144 characters. Tests: `dev_apply_is_scoped`, `single_nat_for_two_zones`, `rejects_an_oversized_document`.
 - Scanners are Trivy, Checkov and gitleaks. Waivers sit on the resource, with the reason, and are listed in [ADR 004](docs/adr/004-security-scanning.md).
 - This is not an official AWS Well-Architected review. A short self-review is in [SECURITY.md](SECURITY.md).
 
