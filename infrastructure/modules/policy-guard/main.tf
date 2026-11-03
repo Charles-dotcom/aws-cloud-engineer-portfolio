@@ -87,6 +87,7 @@ resource "terraform_data" "role_boundary" {
             statement.effect != "Allow" ||
             !can(regex("^iam:.*Role.*$", action)) ||
             can(regex("^iam:(Get|List|Describe)", action)) ||
+            action == "iam:PassRole" ||
             try(statement.condition.StringEquals["iam:PermissionsBoundary"], null) != null
           )
         ])

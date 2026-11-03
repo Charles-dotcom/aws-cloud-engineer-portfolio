@@ -119,13 +119,14 @@ run "dev_apply_is_scoped" {
         && statement.Effect == "Deny"
         && toset(try(tolist(statement.Action), [statement.Action])) == toset(["kms:TagResource", "kms:UntagResource"])
         && try(tolist(statement.Condition.StringNotEquals["aws:ResourceTag/Environment"]), [statement.Condition.StringNotEquals["aws:ResourceTag/Environment"]]) == [env]
-        && contains(try(tolist(statement.Condition["ForAnyValue:StringEquals"]["aws:TagKeys"]), [statement.Condition["ForAnyValue:StringEquals"]["aws:TagKeys"]]), "Environment")
+        && contains(try(tolist(statement.Condition["ForAnyValue:StringEqualsIgnoreCase"]["aws:TagKeys"]), [statement.Condition["ForAnyValue:StringEqualsIgnoreCase"]["aws:TagKeys"]]), "Environment")
         ]) && anytrue([
         for statement in jsondecode(data.aws_iam_policy_document.apply[env].json).Statement :
         statement.Sid == "DenyForeignEc2EnvironmentTag"
         && statement.Effect == "Deny"
         && toset(try(tolist(statement.Action), [statement.Action])) == toset(["ec2:CreateTags", "ec2:DeleteTags"])
         && try(tolist(statement.Condition.StringNotEquals["aws:ResourceTag/Environment"]), [statement.Condition.StringNotEquals["aws:ResourceTag/Environment"]]) == [env]
+        && contains(try(tolist(statement.Condition["ForAnyValue:StringEqualsIgnoreCase"]["aws:TagKeys"]), [statement.Condition["ForAnyValue:StringEqualsIgnoreCase"]["aws:TagKeys"]]), "Environment")
         && try(tolist(statement.Condition.Null["ec2:CreateAction"]), [statement.Condition.Null["ec2:CreateAction"]]) == ["true"]
       ])
     ])

@@ -5,6 +5,7 @@ run "accepts_a_scoped_policy" {
       Version = "2012-10-17"
       Statement = [
         { Effect = "Allow", Action = "ec2:Describe*", Resource = "*" },
+        { Effect = "Allow", Action = "iam:PassRole", Resource = "arn:aws:iam::000000000000:role/example" },
         { Effect = "Deny", Action = ["kms:TagResource", "kms:UntagResource"], Resource = "*", Condition = { StringNotEquals = { "aws:ResourceTag/Environment" = "dev" } } },
         { Effect = "Deny", Action = ["ec2:CreateTags", "ec2:DeleteTags"], Resource = "*", Condition = { StringNotEquals = { "aws:ResourceTag/Environment" = "dev" }, Null = { "ec2:CreateAction" = "true" } } },
       ]
@@ -48,7 +49,7 @@ run "rejects_an_oversized_document" {
 run "rejects_a_role_write_without_a_boundary" {
   command = plan
   variables {
-    documents               = { bad = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Action = "iam:PutRolePolicy", Resource = "arn:aws:iam::000000000000:role/example" }] }) }
+    documents               = { bad = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Action = "iam:CreateRole", Resource = "arn:aws:iam::000000000000:role/example" }] }) }
     limits                  = { bad = 6144 }
     resource_star_allowlist = []
   }

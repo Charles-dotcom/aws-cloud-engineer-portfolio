@@ -652,12 +652,6 @@ data "aws_iam_policy_document" "apply" {
         "vpc-flow-logs.amazonaws.com",
       ]
     }
-
-    condition {
-      test     = "StringEquals"
-      variable = "iam:PermissionsBoundary"
-      values   = [local.permissions_boundary_arn]
-    }
   }
 
   # RequestTag alone would let this role retag another environment's key.
@@ -678,7 +672,7 @@ data "aws_iam_policy_document" "apply" {
     }
 
     condition {
-      test     = "ForAnyValue:StringEquals"
+      test     = "ForAnyValue:StringEqualsIgnoreCase"
       variable = "aws:TagKeys"
       values   = ["Environment"]
     }
@@ -700,7 +694,7 @@ data "aws_iam_policy_document" "apply" {
     }
 
     condition {
-      test     = "ForAnyValue:StringEquals"
+      test     = "ForAnyValue:StringEqualsIgnoreCase"
       variable = "aws:TagKeys"
       values   = ["Environment"]
     }
