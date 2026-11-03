@@ -11,11 +11,13 @@ run "dev_apply_is_scoped" {
   command = plan
 
   variables {
-    account_id         = "000000000000"
-    aws_region         = "af-south-1"
-    project            = "portfolio"
-    github_repository  = "Charles-dotcom/aws-cloud-engineer-portfolio"
-    apply_environments = ["dev", "prod"]
+    account_id        = "000000000000"
+    aws_region        = "af-south-1"
+    project           = "portfolio"
+    github_repository = "Charles-dotcom/aws-cloud-engineer-portfolio"
+    # 12-digit account id and a 36-character key id. Both lengths are fixed,
+    # so this render is the same size as a real account.
+    apply_environments = ["dev", "staging", "prod"]
     state_bucket_name  = "portfolio-tfstate-000000000000"
     lock_table_name    = "portfolio-terraform-locks"
     state_kms_key_arn  = "arn:aws:kms:af-south-1:000000000000:key/11111111-1111-1111-1111-111111111111"
@@ -107,5 +109,46 @@ run "dev_apply_is_scoped" {
       )
     ])
     error_message = "AttachRolePolicy may only attach the ECS execution policy and the RDS monitoring policy."
+  }
+
+  assert {
+    condition = alltrue([
+      for env in ["dev", "staging", "prod"] : anytrue([
+        for statement in jsondecode(data.aws_iam_policy_document.apply[env].json).Statement :
+        statement.Sid == "DenyForeignKmsEnvironmentTag"
+        && statement.Effect == "Deny"
+        && toset(try(tolist(statement.Action), [statement.Action])) == toset(["kms:TagResource", "kms:UntagResource"])
+        && try(tolist(statement.Condition.StringNotEquals["aws:ResourceTag/Environment"]), [statement.Condition.StringNotEquals["aws:ResourceTag/Environment"]]) == [env]
+        && contains(try(tolist(statement.Condition["ForAnyValue:StringEqualsIgnoreCase"]["aws:TagKeys"]), [statement.Condition["ForAnyValue:StringEqualsIgnoreCase"]["aws:TagKeys"]]), "Environment")
+        ]) && anytrue([
+        for statement in jsondecode(data.aws_iam_policy_document.apply[env].json).Statement :
+        statement.Sid == "DenyForeignEc2EnvironmentTag"
+        && statement.Effect == "Deny"
+        && toset(try(tolist(statement.Action), [statement.Action])) == toset(["ec2:CreateTags", "ec2:DeleteTags"])
+        && try(tolist(statement.Condition.StringNotEquals["aws:ResourceTag/Environment"]), [statement.Condition.StringNotEquals["aws:ResourceTag/Environment"]]) == [env]
+        && contains(try(tolist(statement.Condition["ForAnyValue:StringEqualsIgnoreCase"]["aws:TagKeys"]), [statement.Condition["ForAnyValue:StringEqualsIgnoreCase"]["aws:TagKeys"]]), "Environment")
+        && try(tolist(statement.Condition.Null["ec2:CreateAction"]), [statement.Condition.Null["ec2:CreateAction"]]) == ["true"]
+      ])
+    ])
+    error_message = "Apply must deny Environment tag changes on another environment's KMS key, and on an EC2 resource that already exists."
+  }
+
+  assert {
+    condition = alltrue([
+      for statement in jsondecode(data.aws_iam_policy_document.apply["dev"].json).Statement :
+      statement.Effect != "Allow" || alltrue([
+        for action in try(tolist(statement.Action), [statement.Action]) :
+        !strcontains(action, "ec2:") || strcontains(action, "ec2:Describe") || contains(output.ec2_actions_without_resource_permissions, action) || try(statement.Condition.StringEquals["aws:RequestTag/Environment"], null) != null || try(statement.Condition.StringEquals["aws:ResourceTag/Environment"], null) != null
+      ])
+    ])
+    error_message = "The dev policy has an EC2 write with no Environment condition outside the no-resource-level allowlist."
+  }
+
+  assert {
+    condition = alltrue([for env in ["dev", "staging", "prod"] : length(output.apply_managed_policies[env]) <= 10]) && alltrue([
+      for name, size in output.policy_character_counts :
+      size <= (startswith(name, "apply/") || name == "boundary" ? 6144 : 10240)
+    ])
+    error_message = "A rendered policy exceeds 6144 characters for a managed policy or 10240 for an inline policy. ${jsonencode(output.policy_character_counts)}"
   }
 }

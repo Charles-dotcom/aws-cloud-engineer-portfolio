@@ -102,7 +102,12 @@ variable "permissions_boundary_arn" {
 }
 
 variable "tags" {
-  description = "Tags merged onto every resource. Name is added per resource."
+  description = "Tags merged onto every resource. Name is added per resource. Environment is required."
   type        = map(string)
   default     = {}
+
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9-]{1,20}$", lookup(var.tags, "Environment", "")))
+    error_message = "tags.Environment is required so an EC2 delete can match the apply role."
+  }
 }

@@ -52,10 +52,27 @@ resource "aws_iam_role" "apply" {
   }
 }
 
-resource "aws_iam_role_policy" "apply" {
-  for_each = toset(var.apply_environments)
+locals {
+  apply_policy_attachments = {
+    for pair in setproduct(var.apply_environments, module.ci_policies.apply_policy_groups) :
+    "${pair[0]}-${pair[1]}" => {
+      environment = pair[0]
+      group       = pair[1]
+    }
+  }
+}
 
-  name   = "${var.project}-gha-apply-${each.value}"
-  role   = aws_iam_role.apply[each.value].id
-  policy = module.ci_policies.apply_json[each.value]
+resource "aws_iam_policy" "apply" {
+  for_each = local.apply_policy_attachments
+
+  name        = "${var.project}-gha-apply-${each.key}"
+  description = "GitHub Actions apply permissions (${each.value.group}) for the ${each.value.environment} environment."
+  policy      = module.ci_policies.apply_managed_policies[each.value.environment][each.value.group]
+}
+
+resource "aws_iam_role_policy_attachment" "apply" {
+  for_each = local.apply_policy_attachments
+
+  role       = aws_iam_role.apply[each.value.environment].name
+  policy_arn = aws_iam_policy.apply[each.key].arn
 }

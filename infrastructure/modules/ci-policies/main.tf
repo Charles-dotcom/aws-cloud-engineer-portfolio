@@ -6,6 +6,15 @@
 locals {
   # IAM policy ARNs are deterministic: account, the policy/ prefix, and the name.
   permissions_boundary_arn = "arn:aws:iam::${var.account_id}:policy/${var.project}-workload-boundary"
+
+  # Empty: every EC2 write below has a resource type.
+  # https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazonec2.html
+  ec2_actions_without_resource_permissions = []
+
+  ec2_resource_arns = [
+    for type in ["vpc", "subnet", "internet-gateway", "route-table", "elastic-ip", "natgateway", "security-group", "security-group-rule", "vpc-endpoint", "vpc-flow-log"] :
+    "arn:aws:ec2:${var.aws_region}:${var.account_id}:${type}/*"
+  ]
 }
 
 
@@ -186,25 +195,38 @@ data "aws_iam_policy_document" "workload_boundary" {
   #checkov:skip=CKV_AWS_111:The boundary is the maximum for task and monitoring roles. It is not an apply policy.
   #checkov:skip=CKV_AWS_108:The task role must read the database secret and decrypt it. This boundary is that ceiling, not an apply policy.
   statement {
-    sid    = "TaskAndMonitoring"
+    sid    = "NoResourceLevel"
     effect = "Allow"
     actions = [
       "ecr:GetAuthorizationToken",
+      "logs:DescribeLogGroups",
+      "logs:DescribeLogStreams",
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    sid    = "TaskAndMonitoring"
+    effect = "Allow"
+    actions = [
       "ecr:BatchCheckLayerAvailability",
       "ecr:GetDownloadUrlForLayer",
       "ecr:BatchGetImage",
       "logs:CreateLogGroup",
       "logs:CreateLogStream",
       "logs:PutLogEvents",
-      "logs:DescribeLogGroups",
-      "logs:DescribeLogStreams",
       "logs:PutRetentionPolicy",
       "secretsmanager:GetSecretValue",
       "kms:Decrypt",
       "kms:DescribeKey",
       "kms:GenerateDataKey",
     ]
-    resources = ["*"]
+    resources = [
+      "arn:aws:ecr:${var.aws_region}:${var.account_id}:repository/*",
+      "arn:aws:logs:${var.aws_region}:${var.account_id}:log-group:*",
+      "arn:aws:secretsmanager:${var.aws_region}:${var.account_id}:secret:*",
+      "arn:aws:kms:${var.aws_region}:${var.account_id}:key/*",
+    ]
   }
 
   statement {
@@ -281,31 +303,62 @@ data "aws_iam_policy_document" "apply" {
     ]
   }
 
+  # TagSpecifications sets Environment. IfExists rejects a parent from another environment.
   statement {
-    sid    = "ManageNetworking"
+    sid    = "CreateEc2Resources"
     effect = "Allow"
     actions = [
       "ec2:CreateVpc",
+      "ec2:CreateSubnet",
+      "ec2:CreateInternetGateway",
+      "ec2:CreateRouteTable",
+      "ec2:AllocateAddress",
+      "ec2:CreateNatGateway",
+      "ec2:CreateSecurityGroup",
+      "ec2:CreateVpcEndpoint",
+      "ec2:CreateFlowLogs",
+      "ec2:CreateTags",
+    ]
+    resources = local.ec2_resource_arns
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [var.aws_region]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/Environment"
+      values   = [each.value]
+    }
+
+    condition {
+      test     = "StringEqualsIfExists"
+      variable = "aws:ResourceTag/Environment"
+      values   = [each.value]
+    }
+  }
+
+  statement {
+    sid    = "ChangeEc2Resources"
+    effect = "Allow"
+    actions = [
       "ec2:DeleteVpc",
       "ec2:ModifyVpcAttribute",
-      "ec2:CreateSubnet",
       "ec2:DeleteSubnet",
       "ec2:ModifySubnetAttribute",
-      "ec2:CreateInternetGateway",
       "ec2:DeleteInternetGateway",
       "ec2:AttachInternetGateway",
       "ec2:DetachInternetGateway",
-      "ec2:CreateRouteTable",
       "ec2:DeleteRouteTable",
       "ec2:CreateRoute",
       "ec2:DeleteRoute",
+      "ec2:ReplaceRoute",
       "ec2:AssociateRouteTable",
       "ec2:DisassociateRouteTable",
-      "ec2:AllocateAddress",
       "ec2:ReleaseAddress",
-      "ec2:CreateNatGateway",
       "ec2:DeleteNatGateway",
-      "ec2:CreateSecurityGroup",
       "ec2:DeleteSecurityGroup",
       "ec2:AuthorizeSecurityGroupIngress",
       "ec2:AuthorizeSecurityGroupEgress",
@@ -314,20 +367,24 @@ data "aws_iam_policy_document" "apply" {
       "ec2:ModifySecurityGroupRules",
       "ec2:UpdateSecurityGroupRuleDescriptionsIngress",
       "ec2:UpdateSecurityGroupRuleDescriptionsEgress",
-      "ec2:CreateVpcEndpoint",
       "ec2:DeleteVpcEndpoints",
       "ec2:ModifyVpcEndpoint",
-      "ec2:CreateFlowLogs",
       "ec2:DeleteFlowLogs",
       "ec2:CreateTags",
       "ec2:DeleteTags",
     ]
-    resources = ["*"]
+    resources = local.ec2_resource_arns
 
     condition {
       test     = "StringEquals"
       variable = "aws:RequestedRegion"
       values   = [var.aws_region]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/Environment"
+      values   = [each.value]
     }
   }
 
@@ -594,6 +651,173 @@ data "aws_iam_policy_document" "apply" {
         "monitoring.rds.amazonaws.com",
         "vpc-flow-logs.amazonaws.com",
       ]
+    }
+  }
+
+  # RequestTag alone would let this role retag another environment's key.
+  # ec2:CreateAction is set only while the EC2 resource is being created.
+  statement {
+    sid    = "DenyForeignKmsEnvironmentTag"
+    effect = "Deny"
+    actions = [
+      "kms:TagResource",
+      "kms:UntagResource",
+    ]
+    resources = ["arn:aws:kms:${var.aws_region}:${var.account_id}:key/*"]
+
+    condition {
+      test     = "StringNotEquals"
+      variable = "aws:ResourceTag/Environment"
+      values   = [each.value]
+    }
+
+    condition {
+      test     = "ForAnyValue:StringEqualsIgnoreCase"
+      variable = "aws:TagKeys"
+      values   = ["Environment"]
+    }
+  }
+
+  statement {
+    sid    = "DenyForeignEc2EnvironmentTag"
+    effect = "Deny"
+    actions = [
+      "ec2:CreateTags",
+      "ec2:DeleteTags",
+    ]
+    resources = ["*"]
+
+    condition {
+      test     = "StringNotEquals"
+      variable = "aws:ResourceTag/Environment"
+      values   = [each.value]
+    }
+
+    condition {
+      test     = "ForAnyValue:StringEqualsIgnoreCase"
+      variable = "aws:TagKeys"
+      values   = ["Environment"]
+    }
+
+    condition {
+      test     = "Null"
+      variable = "ec2:CreateAction"
+      values   = ["true"]
+    }
+  }
+}
+
+# Split for the managed-policy quota: 6144 non-whitespace characters, 10 per role.
+# https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_iam-quotas.html
+locals {
+  managed_policy_limit = 6144
+  inline_policy_limit  = 10240
+  max_managed_policies = 10
+
+  apply_groups = {
+    state = [
+      "DenyLongLivedIdentity",
+      "DenyCiRoleAndOidcChanges",
+      "DenyUnrelatedCompute",
+      "ReadStateBucket",
+      "ReadStateObjects",
+      "StateLock",
+      "StateKey",
+      "ReadThisStack",
+      "WriteOwnState",
+      "EncryptOwnState",
+      "DenyStateKeyDeletion",
+      "ManageBucketsForThisEnvironment",
+      "EcrAuth",
+    ]
+    identity = [
+      "CreateRolesForThisEnvironment",
+      "AttachKnownServicePolicies",
+      "PassRolesThisEnvironment",
+    ]
+    network = [
+      "CreateEc2Resources",
+      "ChangeEc2Resources",
+    ]
+    tag = [
+      "DenyForeignKmsEnvironmentTag",
+      "DenyForeignEc2EnvironmentTag",
+    ]
+    workload = [
+      "ManageWorkloadServices",
+      "CreateWorkloadServices",
+      "CreateKeyForThisEnvironment",
+    ]
+  }
+
+  apply_statements = {
+    for env, doc in data.aws_iam_policy_document.apply :
+    env => {
+      for statement in jsondecode(doc.json).Statement :
+      statement.Sid => statement
+    }
+  }
+
+  apply_managed_policies = {
+    for env in var.apply_environments : env => {
+      for group, sids in local.apply_groups :
+      group => jsonencode({
+        Version   = "2012-10-17"
+        Statement = [for sid in sids : local.apply_statements[env][sid]]
+      })
+    }
+  }
+
+  guarded_documents = merge(
+    {
+      for pair in setproduct(var.apply_environments, keys(local.apply_groups)) :
+      "apply/${pair[0]}/${pair[1]}" => local.apply_managed_policies[pair[0]][pair[1]]
+    },
+    {
+      plan       = data.aws_iam_policy_document.plan.json
+      boundary   = data.aws_iam_policy_document.workload_boundary.json
+      plan_trust = data.aws_iam_policy_document.plan_trust.json
+    },
+    {
+      for env, doc in data.aws_iam_policy_document.apply_trust :
+      "apply_trust/${env}" => doc.json
+    },
+  )
+
+  policy_character_counts = {
+    for name, doc in local.guarded_documents :
+    name => length(replace(replace(replace(replace(doc, " ", ""), "\n", ""), "\r", ""), "\t", ""))
+  }
+
+  # Plan read patterns, plus kms:CreateKey and ecr:GetAuthorizationToken, which have no resource ARN.
+  # https://docs.aws.amazon.com/service-authorization/latest/reference/reference_policies_actions-resources-contextkeys.html
+  actions_without_resource_level_permissions = split(",", "ec2:Describe*,elasticloadbalancing:Describe*,ecs:Describe*,ecs:List*,ecr:Describe*,ecr:Get*,ecr:List*,ecr:GetAuthorizationToken,rds:Describe*,rds:List*,logs:Describe*,logs:List*,logs:DescribeLogGroups,logs:DescribeLogStreams,iam:Get*,iam:List*,kms:Describe*,kms:Get*,kms:List*,kms:CreateKey,secretsmanager:Describe*,secretsmanager:List*,secretsmanager:GetResourcePolicy,application-autoscaling:Describe*,cloudwatch:Describe*,cloudwatch:List*,s3:ListAllMyBuckets")
+}
+
+module "policy_guard" {
+  source = "../policy-guard"
+
+  documents = local.guarded_documents
+  limits = {
+    for name, _ in local.guarded_documents :
+    name => startswith(name, "apply/") || name == "boundary" ? local.managed_policy_limit : local.inline_policy_limit
+  }
+  resource_star_allowlist      = local.actions_without_resource_level_permissions
+  require_environment_tag_deny = [for env in var.apply_environments : "apply/${env}/tag"]
+}
+
+resource "terraform_data" "policy_partition" {
+  lifecycle {
+    precondition {
+      condition = (
+        length(local.apply_groups) <= local.max_managed_policies
+        && length(flatten(values(local.apply_groups))) == length(toset(flatten(values(local.apply_groups))))
+        && alltrue([
+          for env in var.apply_environments :
+          toset(keys(local.apply_statements[env])) == toset(flatten(values(local.apply_groups)))
+        ])
+      )
+      error_message = "Every apply statement must be in exactly one of at most 10 managed policies."
     }
   }
 }

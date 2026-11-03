@@ -14,7 +14,8 @@ TF_TESTS := infrastructure/modules/vpc \
 	infrastructure/modules/security-groups \
 	infrastructure/modules/rds \
 	infrastructure/modules/workload \
-	infrastructure/modules/ci-policies
+	infrastructure/modules/ci-policies \
+	infrastructure/modules/policy-guard
 
 .PHONY: help fmt fmt-check validate lint test python-test terraform-test security check
 
