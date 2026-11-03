@@ -113,6 +113,27 @@ run "dev_apply_is_scoped" {
 
   assert {
     condition = alltrue([
+      for env in ["dev", "staging", "prod"] : anytrue([
+        for statement in jsondecode(data.aws_iam_policy_document.apply[env].json).Statement :
+        statement.Sid == "DenyForeignKmsEnvironmentTag"
+        && statement.Effect == "Deny"
+        && toset(try(tolist(statement.Action), [statement.Action])) == toset(["kms:TagResource", "kms:UntagResource"])
+        && try(tolist(statement.Condition.StringNotEquals["aws:ResourceTag/Environment"]), [statement.Condition.StringNotEquals["aws:ResourceTag/Environment"]]) == [env]
+        && contains(try(tolist(statement.Condition["ForAnyValue:StringEquals"]["aws:TagKeys"]), [statement.Condition["ForAnyValue:StringEquals"]["aws:TagKeys"]]), "Environment")
+        ]) && anytrue([
+        for statement in jsondecode(data.aws_iam_policy_document.apply[env].json).Statement :
+        statement.Sid == "DenyForeignEc2EnvironmentTag"
+        && statement.Effect == "Deny"
+        && toset(try(tolist(statement.Action), [statement.Action])) == toset(["ec2:CreateTags", "ec2:DeleteTags"])
+        && try(tolist(statement.Condition.StringNotEquals["aws:ResourceTag/Environment"]), [statement.Condition.StringNotEquals["aws:ResourceTag/Environment"]]) == [env]
+        && try(tolist(statement.Condition.Null["ec2:CreateAction"]), [statement.Condition.Null["ec2:CreateAction"]]) == ["true"]
+      ])
+    ])
+    error_message = "Apply must deny Environment tag changes on another environment's KMS key, and on an EC2 resource that already exists."
+  }
+
+  assert {
+    condition = alltrue([
       for env in ["dev", "staging", "prod"] :
       length(output.apply_managed_policies[env]) <= 10 && alltrue([
         for group, doc in output.apply_managed_policies[env] :

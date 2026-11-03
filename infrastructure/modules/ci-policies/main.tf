@@ -596,6 +596,60 @@ data "aws_iam_policy_document" "apply" {
       ]
     }
   }
+
+  # TagResource with only aws:RequestTag/Environment would let this role retag
+  # another environment's key, then schedule its deletion. Deny that, and the
+  # same change to an EC2 resource that already exists (ec2:CreateAction is set
+  # only while the resource is being created).
+  statement {
+    sid    = "DenyForeignKmsEnvironmentTag"
+    effect = "Deny"
+    actions = [
+      "kms:TagResource",
+      "kms:UntagResource",
+    ]
+    resources = ["arn:aws:kms:${var.aws_region}:${var.account_id}:key/*"]
+
+    condition {
+      test     = "StringNotEquals"
+      variable = "aws:ResourceTag/Environment"
+      values   = [each.value]
+    }
+
+    condition {
+      test     = "ForAnyValue:StringEquals"
+      variable = "aws:TagKeys"
+      values   = ["Environment"]
+    }
+  }
+
+  statement {
+    sid    = "DenyForeignEc2EnvironmentTag"
+    effect = "Deny"
+    actions = [
+      "ec2:CreateTags",
+      "ec2:DeleteTags",
+    ]
+    resources = ["*"]
+
+    condition {
+      test     = "StringNotEquals"
+      variable = "aws:ResourceTag/Environment"
+      values   = [each.value]
+    }
+
+    condition {
+      test     = "ForAnyValue:StringEquals"
+      variable = "aws:TagKeys"
+      values   = ["Environment"]
+    }
+
+    condition {
+      test     = "Null"
+      variable = "ec2:CreateAction"
+      values   = ["true"]
+    }
+  }
 }
 
 # The apply document above is what a reviewer reads. AWS will not store it as
@@ -630,6 +684,10 @@ locals {
       "PassRolesThisEnvironment",
     ]
     network = ["ManageNetworking"]
+    tag = [
+      "DenyForeignKmsEnvironmentTag",
+      "DenyForeignEc2EnvironmentTag",
+    ]
     workload = [
       "ManageWorkloadServices",
       "CreateWorkloadServices",
